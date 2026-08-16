@@ -25,10 +25,10 @@ Esta arquitectura describe un sistema de Generación Aumentada por Recuperación
     * `backups/`: Copias de seguridad y versiones.
 
 ### 4. Base de Datos Vectorial (RAG / Knowledge Base)
-* **Amazon OpenSearch Serverless** *(o alternativamente **Aurora PostgreSQL + pgvector**)*: Almacena los vectores de embeddings y sus metadatos. Se utiliza para realizar las búsquedas de similitud e indexación vectorial durante la consulta RAG.
+* **Pinecon** **: Almacena los vectores de embeddings y sus metadatos. Se utiliza para realizar las búsquedas de similitud e indexación vectorial durante la consulta RAG.
 
 ### 5. Inteligencia Artificial / Modelos Generativos (LLM & Embeddings)
-* **Amazon Bedrock:** 
+* **Grok api** 
   * **Embeddings:** Genera la representación vectorial de los textos durante el proceso de ingestión.
   * **LLM (Claude, Llama, Mistral, Nova, etc.):** Procesa el contexto recuperado junto a la pregunta del usuario para generar la respuesta final.
 
@@ -52,15 +52,15 @@ Esta arquitectura describe un sistema de Generación Aumentada por Recuperación
 1. **Carga:** Se sube un archivo (PDF, DOCX, TXT) al bucket **Amazon S3**.
 2. **Evento:** S3 dispara un evento que invoca a **AWS Lambda**.
 3. **Procesamiento:** Lambda extrae el texto y lo divide en fragmentos (*chunks*).
-4. **Vectorización:** Lambda envía los fragmentos a **Amazon Bedrock** para generar los *embeddings*.
-5. **Almacenamiento Vectorial:** Los vectores y metadatos generados se almacenan en el **Banco Vectorial** (OpenSearch Serverless o Aurora PostgreSQL con pgvector).
+4. **Vectorización:** Lambda envía los fragmentos a **Grok api** para generar los *embeddings*.
+5. **Almacenamiento Vectorial:** Los vectores y metadatos generados se almacenan en el **Banco Vectorial** (PINECON).
 
 ### B. Flujo de Consulta (RAG)
-1. **Envío:** El **Usuario** realiza una pregunta desde la App Web/Mobile.
+1. **Envío:** El **Usuario** realiza una pregunta desde la App Web.
 2. **Recepción:** **Amazon API Gateway** recibe la solicitud HTTPS.
 3. **Procesamiento:** **AWS Lambda** procesa la solicitud.
 4. **Búsqueda Vectorial:** Lambda consulta la **Knowledge Base / Banco Vectorial** para recuperar los fragmentos de texto más relevantes.
-5. **Generación:** Lambda envía la pregunta original + el contexto recuperado a **Amazon Bedrock (LLM)**.
-6. **Respuesta:** Bedrock genera la respuesta basada en el contexto recibido y se la devuelve a Lambda.
+5. **Generación:** Lambda envía la pregunta original + el contexto recuperado a **Grok api**.
+6. **Respuesta:** Grok genera la respuesta basada en el contexto recibido y se la devuelve a Lambda.
 7. **Guardado:** Lambda registra la conversación/interacción en **Amazon DynamoDB**.
 8. **Devolución:** La respuesta final se entrega al usuario a través de API Gateway.
