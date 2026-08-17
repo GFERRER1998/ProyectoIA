@@ -1,3 +1,5 @@
 com\example\TextChunker.class
-com\example\TextChunker$ChunkingResult.class
 com\example\PdfTextExtractor.class
+com\example\PineconeClient.class
+com\example\TextChunker$ChunkingResult.class
+com\example\PineconeClient$PineconeRecord.class

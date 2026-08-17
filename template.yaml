@@ -5,6 +5,18 @@ Description: >
 
   Función Lambda para extraer texto de archivos PDF subidos a S3 Express One Zone
 
+Parameters:
+  PineconeSecretArn:
+    Type: String
+    Description: ARN del secreto de Secrets Manager que contiene apiKey o PINECONE_API_KEY
+  PineconeIndexHost:
+    Type: String
+    Description: Host HTTPS del índice Pinecone, sin https:// final
+  PineconeNamespace:
+    Type: String
+    Default: documents-dev
+    Description: Namespace donde se almacenarán los chunks
+
 Resources:
   PdfTextExtractorFunction:
     Type: AWS::Serverless::Function
@@ -14,8 +26,13 @@ Resources:
       Runtime: java17
       Architectures:
         - x86_64
-      MemorySize: 512
-      Timeout: 30
+      MemorySize: 1024
+      Timeout: 120
+      Environment:
+        Variables:
+          PINECONE_SECRET_ARN: !Ref PineconeSecretArn
+          PINECONE_INDEX_HOST: !Ref PineconeIndexHost
+          PINECONE_NAMESPACE: !Ref PineconeNamespace
       Policies:
         - Statement:
             - Effect: Allow
@@ -23,6 +40,10 @@ Resources:
                 - s3:*
                 - s3express:*
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref PineconeSecretArn
 
 Outputs:
   PdfTextExtractorFunctionArn:

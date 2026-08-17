@@ -2,6 +2,8 @@ package com.example;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -58,5 +60,28 @@ class TextChunkerTest {
 
         assertEquals(2, result.minEstimatedTokens());
         assertEquals(2, result.maxEstimatedTokens());
+    }
+
+    @Test
+    void generatesStablePineconeIdsForRetries() {
+        String first = PineconeClient.vectorId("bucket", "documents/a.pdf", "etag-1", 0);
+        String retry = PineconeClient.vectorId("bucket", "documents/a.pdf", "etag-1", 0);
+        String nextChunk = PineconeClient.vectorId("bucket", "documents/a.pdf", "etag-1", 1);
+
+        assertEquals(first, retry);
+        assertFalse(first.equals(nextChunk));
+        assertTrue(first.endsWith("_chunk_0"));
+    }
+
+    @Test
+    void buildsPineconeIntegratedEmbeddingNdjsonPayload() {
+        String payload = PineconeClient.buildNdjson(
+                "bucket", "documents/a.pdf", "etag-1", "application/pdf", List.of("primer chunk"));
+
+        assertTrue(payload.contains("\"_id\""));
+        assertTrue(payload.contains("\"chunk_text\":\"primer chunk\""));
+        assertTrue(payload.contains("\"document_id\""));
+        assertTrue(payload.contains("\"source_key\":\"documents/a.pdf\""));
+        assertTrue(payload.endsWith("\n"));
     }
 }
