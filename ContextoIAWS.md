@@ -1,5 +1,4 @@
-Estructura creada en tu bucket bucketdedocumentos--use2-az1--x-s3:
-
+Estructura creada en tu bucket aws-sam-cli-managed-default-samclisourcebucket-1yyomhgibywp
 documents/
 documents/pdf/
 documents/docx/

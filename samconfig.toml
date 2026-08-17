@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+stack_name = "pdf-extractor-lambda-stack"
+s3_prefix = "pdf-extractor-lambda-stack"
+region = "us-east-2"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
