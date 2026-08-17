@@ -19,6 +19,7 @@
         <aws.lambda.events.version>3.11.4</aws.lambda.events.version>
         <pdfbox.version>3.0.2</pdfbox.version>
         <slf4j.version>2.0.12</slf4j.version>
+        <junit.version>5.10.2</junit.version>
     </properties>
 
     <!-- 
@@ -75,11 +76,20 @@
             <artifactId>slf4j-simple</artifactId>
             <version>${slf4j.version}</version>
         </dependency>
+
+        <!-- Tests unitarios: validan normalización y chunking antes del despliegue -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
             <!-- Compiler plugin -->
+            <!-- Ejecuta los tests JUnit 5 durante mvn test y mvn package -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -117,6 +127,12 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
             </plugin>
         </plugins>
     </build>

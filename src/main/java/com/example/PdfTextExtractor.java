@@ -14,9 +14,9 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
-import java.io.InputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 public class PdfTextExtractor implements RequestHandler<S3Event, String> {
 
@@ -35,6 +35,7 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
 
     @Override
     public String handleRequest(S3Event s3event, Context context) {
+        // Punto de entrada de Lambda: S3 entrega el bucket y la clave del PDF.
         logger.info("Iniciando procesamiento de evento S3...");
         
         try {
@@ -58,14 +59,14 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
                 return "Not a PDF";
             }
 
-            // Configurar el request para obtener el objeto de S3
+            // Paso 1: configurar el request para obtener el objeto de S3.
             GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                     .bucket(srcBucket)
                     .key(srcKey)
                     .build();
 
             logger.info("Descargando PDF desde S3...");
-            // Extraer el texto del PDF
+            // Paso 2: descargar el PDF y extraer su capa de texto con PDFBox.
             String extractedText = "";
             try (ResponseInputStream<GetObjectResponse> s3Object = s3Client.getObject(getObjectRequest);
                  PDDocument document = Loader.loadPDF(s3Object.readAllBytes())) {
@@ -80,15 +81,30 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
             }
 
             logger.info("Extracción completada. Longitud del texto: {} caracteres.", extractedText.length());
-            
-            // TODO: En el futuro, aquí es donde conectaríamos con Pinecone.
-            // Para transformar `extractedText` en Embeddings y subirlos.
-            // Por ahora solo retornamos/logueamos el string.
+
+            // Paso 3: normalizar el texto y dividirlo en chunks por tokens estimados.
+            // Todavía no se llama a ninguna API externa; esta es la salida de esta fase.
+            TextChunker.ChunkingResult chunking = TextChunker.process(extractedText);
+            List<String> chunks = chunking.chunks();
+            if (chunks.isEmpty()) {
+                // Un PDF escaneado normalmente no tiene capa de texto; se tratará
+                // en una fase posterior con OCR si fuese necesario.
+                logger.warn("No se extrajo texto utilizable del archivo: {}", srcKey);
+                return "Sin texto extraible. Archivo: " + srcKey;
+            }
+
+            // Paso 4: registrar métricas para verificar el resultado en CloudWatch.
+            logger.info("Normalización y chunking completados. Chunks: {}, tokens estimados por chunk: {}-{}",
+                    chunks.size(), chunking.minEstimatedTokens(), chunking.maxEstimatedTokens());
 
             logger.debug("Texto extraído (preview): {}", 
                 extractedText.length() > 200 ? extractedText.substring(0, 200) + "..." : extractedText);
+            logger.debug("Chunks preview: {}", chunks.subList(0, Math.min(2, chunks.size())));
 
-            return "Exito. Archivo procesado: " + srcKey + ". Caracteres extraidos: " + extractedText.length();
+            // Paso 5: devolver un resumen. Más adelante, aquí se conectarán
+            // embeddings y Pinecone sin cambiar la extracción del PDF.
+            return "Exito. Archivo procesado: " + srcKey + ". Caracteres extraidos: "
+                    + extractedText.length() + ". Chunks generados: " + chunks.size();
 
         } catch (Exception e) {
             logger.error("Error global procesando el evento de S3", e);

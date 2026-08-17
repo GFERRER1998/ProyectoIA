@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "pdf-extractor-lambda\nFunci\xF3n Lambda para extraer texto de archivos\
+  \ PDF subidos a S3 Express One Zone\n"
+Resources:
+  PdfTextExtractorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: PdfTextExtractorFunction
+      Handler: com.example.PdfTextExtractor::handleRequest
+      Runtime: java17
+      Architectures:
+      - x86_64
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - s3:*
+          - s3express:*
+          Resource: '*'
+    Metadata:
+      SamResourceId: PdfTextExtractorFunction
+Outputs:
+  PdfTextExtractorFunctionArn:
+    Description: "ARN de la funci\xF3n Lambda de extracci\xF3n de PDF"
+    Value:
+      Fn::GetAtt:
+      - PdfTextExtractorFunction
+      - Arn
