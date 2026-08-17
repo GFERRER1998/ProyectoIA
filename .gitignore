@@ -1,0 +1,16 @@
+# Secretos y credenciales locales
+.env
+
+# Build de Maven
+target/
+
+# Artefactos de SAM
+.aws-sam/
+
+# Logs
+*.log
+
+# IDEs
+.idea/
+.vscode/
+*.iml

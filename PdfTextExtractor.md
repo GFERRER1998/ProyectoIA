@@ -2,7 +2,7 @@
 
 ## Propósito
 
-`PdfTextExtractor` es el punto de entrada de AWS Lambda. AWS S3 lo invoca cuando se crea un objeto y la clase coordina todo el procesamiento de cada PDF.
+`PdfTextExtractor` es el punto de entrada de AWS Lambda. El bucket S3 `rag-documents-683023468765` lo invoca automáticamente cuando se crea un archivo `.pdf` dentro del prefijo `documents/` (evento `s3:ObjectCreated:*` + filtros de prefijo/sufijo definidos en `template.yaml`).
 
 El flujo actual es:
 
@@ -84,8 +84,9 @@ La Lambda usa estas variables:
 - `PINECONE_SECRET_ARN`: ARN del secreto con la API key.
 - `PINECONE_INDEX_HOST`: host HTTPS del índice.
 - `PINECONE_NAMESPACE`: namespace de destino.
+- `PINECONE_TEXT_FIELD`: campo del registro que el índice mapea para embedding (default `text`).
 
-La identidad de ejecución necesita permiso `secretsmanager:GetSecretValue` sobre el secreto.
+La identidad de ejecución necesita permiso `secretsmanager:GetSecretValue` sobre el secreto. El bucket y el trigger S3 se gestionan desde el stack (ver `sam_explicacion.md`).
 
 ## Contexto para IA
 

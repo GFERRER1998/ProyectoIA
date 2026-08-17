@@ -76,10 +76,10 @@ class TextChunkerTest {
     @Test
     void buildsPineconeIntegratedEmbeddingNdjsonPayload() {
         String payload = PineconeClient.buildNdjson(
-                "bucket", "documents/a.pdf", "etag-1", "application/pdf", List.of("primer chunk"));
+                "bucket", "documents/a.pdf", "etag-1", "application/pdf", "text", List.of("primer chunk"));
 
         assertTrue(payload.contains("\"_id\""));
-        assertTrue(payload.contains("\"chunk_text\":\"primer chunk\""));
+        assertTrue(payload.contains("\"text\":\"primer chunk\""));
         assertTrue(payload.contains("\"document_id\""));
         assertTrue(payload.contains("\"source_key\":\"documents/a.pdf\""));
         assertTrue(payload.endsWith("\n"));

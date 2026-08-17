@@ -43,17 +43,18 @@ public final class PineconeClient {
     private final String apiKey;
     private final String indexHost;
     private final String namespace;
+    private final String textField;
     private final Duration requestTimeout;
 
     public PineconeClient(String apiKey, String indexHost, String namespace) {
         // Constructor usado por la Lambda en produccion.
         // HttpClient se reutiliza durante invocaciones calientes de Lambda.
-        this(apiKey, indexHost, namespace,
+        this(apiKey, indexHost, namespace, "text",
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
                 Duration.ofSeconds(30));
     }
 
-    PineconeClient(String apiKey, String indexHost, String namespace,
+    PineconeClient(String apiKey, String indexHost, String namespace, String textField,
                    HttpClient httpClient, Duration requestTimeout) {
         // Validamos la configuracion antes de aceptar documentos para evitar
         // llamadas HTTP imposibles o errores poco claros durante el upsert.
@@ -64,6 +65,9 @@ public final class PineconeClient {
         // El host puede venir con una barra final; la quitamos para no formar URLs //records.
         this.indexHost = removeTrailingSlash(indexHost);
         this.namespace = namespace == null || namespace.isBlank() ? "__default__" : namespace;
+        // El indice mapea el texto a embedding mediante field_map. En rag-index el
+        // campo configurado es "text" y el codigo lo lee desde PINECONE_TEXT_FIELD.
+        this.textField = textField == null || textField.isBlank() ? "text" : textField;
         this.httpClient = httpClient;
         this.requestTimeout = requestTimeout;
         this.gson = new Gson();
@@ -79,7 +83,10 @@ public final class PineconeClient {
                 .build()).secretString();
         return new PineconeClient(parseApiKey(secret),
                 requiredEnvironment("PINECONE_INDEX_HOST"),
-                System.getenv("PINECONE_NAMESPACE"));
+                System.getenv("PINECONE_NAMESPACE"),
+                System.getenv("PINECONE_TEXT_FIELD"),
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
+                Duration.ofSeconds(30));
     }
 
     public void upsertChunks(String bucket, String key, String etag, String contentType,
@@ -102,7 +109,6 @@ public final class PineconeClient {
                             "source_bucket", bucket,
                             "source_key", key,
                             "chunk_index", Integer.toString(index),
-                            "chunk_text", chunk,
                             "content_type", contentType == null ? "application/pdf" : contentType,
                             "ingested_at", ingestedAt)));
         }
@@ -122,7 +128,8 @@ public final class PineconeClient {
         for (PineconeRecord record : records) {
             JsonObject json = new JsonObject();
             json.addProperty("_id", record.id());
-            json.addProperty("chunk_text", record.chunkText());
+            // El texto se envia en el campo que el indice tiene configurado en field_map.
+            json.addProperty(textField, record.chunkText());
             record.metadata().forEach(json::addProperty);
             body.append(gson.toJson(json)).append('\n');
         }
@@ -182,9 +189,10 @@ public final class PineconeClient {
     }
 
     static String buildNdjson(String bucket, String key, String etag, String contentType,
-                              List<String> chunks) {
+                              String textField, List<String> chunks) {
         // Metodo auxiliar para tests y diagnostico: construye el mismo formato
         // que se envia al endpoint sin ejecutar una llamada de red.
+        String safeTextField = textField == null || textField.isBlank() ? "text" : textField;
         String documentId = documentId(bucket, key, etag);
         String ingestedAt = Instant.now().toString();
         Gson gson = new Gson();
@@ -196,7 +204,7 @@ public final class PineconeClient {
             json.addProperty("source_bucket", bucket);
             json.addProperty("source_key", key);
             json.addProperty("chunk_index", Integer.toString(index));
-            json.addProperty("chunk_text", chunks.get(index));
+            json.addProperty(safeTextField, chunks.get(index));
             json.addProperty("content_type", contentType == null ? "application/pdf" : contentType);
             json.addProperty("ingested_at", ingestedAt);
             body.append(gson.toJson(json)).append('\n');

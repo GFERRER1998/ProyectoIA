@@ -3,49 +3,109 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   pdf-extractor-lambda
 
-  Función Lambda para extraer texto de archivos PDF subidos a S3 Express One Zone
+  Funcion Lambda que extrae texto de PDFs subidos a S3, divide en chunks
+  y los indexa en Pinecone. Se dispara automaticamente con el evento
+  s3:ObjectCreated sobre archivos .pdf del prefijo documents/.
 
+# ---------------------------------------------------------------------------
+# Parametros: valores que se pasan en el deploy con --parameter-overrides.
+# No se escriben en el template para no fijar secretos ni nombres en el codigo.
+# ---------------------------------------------------------------------------
 Parameters:
+  BucketName:
+    Type: String
+    Description: Nombre del bucket donde se guardan los PDFs (prefijo documents/)
   PineconeSecretArn:
     Type: String
     Description: ARN del secreto de Secrets Manager que contiene apiKey o PINECONE_API_KEY
   PineconeIndexHost:
     Type: String
-    Description: Host HTTPS del índice Pinecone, sin https:// final
+    Description: Host HTTPS del indice Pinecone, sin https:// final
   PineconeNamespace:
     Type: String
     Default: documents-dev
-    Description: Namespace donde se almacenarán los chunks
+    Description: Namespace donde se almacenaran los chunks
+  PineconeTextField:
+    Type: String
+    Default: text
+    Description: Campo del registro que el indice mapea para embedding (field_map)
 
 Resources:
+  # -------------------------------------------------------------------------
+  # Bucket de documentos: aqui se suben los PDFs. El nombre es global en AWS,
+  # por eso se recibe como parametro en vez de inventarlo dentro del template.
+  # -------------------------------------------------------------------------
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+
+  # -------------------------------------------------------------------------
+  # Funcion Lambda: orquesta todo el flujo de ingesta. No contiene la logica
+  # detallada de extraccion, chunking ni HTTP; esos pasos viven en las clases
+  # PdfTextExtractor, TextChunker y PineconeClient del JAR.
+  # -------------------------------------------------------------------------
   PdfTextExtractorFunction:
     Type: AWS::Serverless::Function
     Properties:
+      # El codigo es el proyecto completo; Maven construye el JAR al hacer build.
       CodeUri: .
+      # Clase y metodo de entrada que ejecuta Lambda al despertar.
       Handler: com.example.PdfTextExtractor::handleRequest
       Runtime: java17
       Architectures:
         - x86_64
+      # 1 GB de RAM y hasta 2 minutos: un PDF grande con muchos chunks necesita
+      # memoria y tiempo para extraer, dividir y enviar todo a Pinecone.
       MemorySize: 1024
       Timeout: 120
       Environment:
         Variables:
+          # La Lambda solo conoce el ARN del secreto; la API key se consulta
+          # por IAM y nunca se escribe en codigo ni en logs.
           PINECONE_SECRET_ARN: !Ref PineconeSecretArn
           PINECONE_INDEX_HOST: !Ref PineconeIndexHost
           PINECONE_NAMESPACE: !Ref PineconeNamespace
+          # Campo que el indice usa para embedding. En rag-index es "text";
+          # si el indice cambiara de field_map, solo se cambia este parametro.
+          PINECONE_TEXT_FIELD: !Ref PineconeTextField
       Policies:
         - Statement:
+            # Leer PDFs de cualquier bucket (el evento S3 puede llegar de
+            # cualquier bucket del futuro; el filtro real esta en el trigger).
             - Effect: Allow
               Action:
                 - s3:*
                 - s3express:*
               Resource: "*"
+            # Acceso minimo a secretos: solo puede leer el secreto de Pinecone,
+            # nunca otros secretos de la cuenta.
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Ref PineconeSecretArn
+      Events:
+        # Trigger de ingesta: despierta la Lambda SOLO cuando se crea un objeto
+        # en el bucket que cumpla los dos filtros (prefijo documents/ y .pdf).
+        # Un .jpg o un archivo fuera de documents/ no invoca nada.
+        PdfCreatedEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref DocumentsBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: documents/
+                  - Name: suffix
+                    Value: .pdf
 
 Outputs:
+  # Salidas utiles para el operador: aparecen al final del sam deploy.
   PdfTextExtractorFunctionArn:
-    Description: "ARN de la función Lambda de extracción de PDF"
+    Description: "ARN de la funcion Lambda de extraccion de PDF"
     Value: !GetAtt PdfTextExtractorFunction.Arn
+  DocumentsBucketName:
+    Description: "Bucket S3 donde se suben los PDFs (prefijo documents/)"
+    Value: !Ref DocumentsBucket

@@ -17,10 +17,12 @@ POST https://<INDEX_HOST>/records/namespaces/<NAMESPACE>/upsert
 El cuerpo usa NDJSON, es decir, un objeto JSON por línea:
 
 ```json
-{"_id":"abc_chunk_0","chunk_text":"Texto del chunk","document_id":"abc"}
+{"_id":"abc_chunk_0","text":"Texto del chunk","document_id":"abc"}
 ```
 
-Pinecone lee `chunk_text` y genera el vector con el modelo configurado en el índice, por ejemplo `llama-text-embed-v2`.
+Pinecone lee el campo mapeado en `field_map` (en `rag-index` el campo configurado es `text`, NO `chunk_text`) y genera el vector con el modelo configurado en el índice, por ejemplo `llama-text-embed-v2`.
+
+El nombre del campo se lee desde la variable `PINECONE_TEXT_FIELD` (default `text`). Si el índice se creara con otro `field_map`, solo se cambia esa variable, no el código.
 
 No se utiliza `/vectors/upsert` con un campo `embed`. Ese endpoint se utiliza cuando la aplicación ya posee los valores numéricos del vector.
 
@@ -44,6 +46,7 @@ También prepara un `HttpClient` reutilizable y configura timeout de conexión y
 - La API key desde AWS Secrets Manager.
 - `PINECONE_INDEX_HOST` desde variables de entorno.
 - `PINECONE_NAMESPACE` desde variables de entorno.
+- `PINECONE_TEXT_FIELD` desde variables de entorno (default `text`).
 
 El secreto puede contener directamente la key o un JSON:
 
@@ -90,9 +93,10 @@ Cada registro conserva información para rastrear el origen:
 | `source_bucket` | Saber de qué bucket viene |
 | `source_key` | Saber la ruta del PDF |
 | `chunk_index` | Conservar el orden original |
-| `chunk_text` | Texto fuente del fragmento |
 | `content_type` | Tipo del archivo |
 | `ingested_at` | Fecha de indexación |
+
+El texto en sí no se duplica en metadata: vive en el campo `text` que el índice usa para el embedding.
 
 ### 6. Se dividen los registros en lotes
 

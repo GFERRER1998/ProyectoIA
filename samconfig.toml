@@ -1,13 +1,37 @@
+# =============================================================================
+# samconfig.toml: preferencias guardadas del SAM CLI.
+#
+# Evita repetir argumentos en cada comando. Define COMO se ejecutan
+# sam build y sam deploy, no QUE recursos se crean (eso vive en template.yaml).
+# =============================================================================
+
 version = 0.1
 
+# -----------------------------------------------------------------------------
+# Configuracion de "sam build": como se compila el proyecto localmente.
+# -----------------------------------------------------------------------------
 [default.build.parameters]
+# No recompilar las partes que no cambiaron desde el ultimo build.
 cached = true
+# Si hubiera varias funciones, compilarlas todas al mismo tiempo.
 parallel = true
 
+# -----------------------------------------------------------------------------
+# Configuracion de "sam deploy": como se sube la aplicacion a AWS.
+# -----------------------------------------------------------------------------
 [default.deploy.parameters]
+# Nombre del stack en CloudFormation: agrupa todos los recursos de la app.
 stack_name = "pdf-extractor-lambda-stack"
+# Subcarpeta del bucket interno de SAM donde se guarda el JAR compilado.
 s3_prefix = "pdf-extractor-lambda-stack"
-region = "us-east-2"
+# Region del deploy. Debe coincidir con la del secreto y del indice Pinecone.
+region = "us-east-1"
+# Aplicar los cambios directamente sin pedir confirmacion interactiva.
 confirm_changeset = false
+# Autorizar explicitamente la creacion de roles y permisos IAM durante el deploy.
 capabilities = "CAPABILITY_IAM"
+# Crear automaticamente el bucket interno de SAM si no existe.
 resolve_s3 = true
+
+# Nota: los parametros del template (BucketName, PineconeSecretArn, etc.)
+# NO van aqui: se pasan en cada deploy con --parameter-overrides.
