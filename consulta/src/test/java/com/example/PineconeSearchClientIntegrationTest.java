@@ -15,11 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Prueba de integración contra el índice real de Pinecone.
+ * Test de integracion contra el indice Pinecone real.
  *
- * <p>Se omite automáticamente si las variables {@code PINECONE_API_KEY} o {@code PINECONE_INDEX_HOST}
- * no están definidas en el entorno local. Valida que la búsqueda devuelva fragmentos relevantes
- * con sus campos de texto y metadatos de trazabilidad intactos.</p>
+ * Se salta si falta configuracion: PINECONE_API_KEY, PINECONE_INDEX_HOST.
+ * Flujo: busca los topK chunks mas relevantes a una pregunta y valida que la
+ * respuesta incluya texto de chunk (campo "text") y metadatos de origen.
+ * Para correrlo: set -a; source .env; set +a; mvn test
  */
 class PineconeSearchClientIntegrationTest {
 
@@ -27,9 +28,6 @@ class PineconeSearchClientIntegrationTest {
 
     private static PineconeSearchClient client;
 
-    /**
-     * Inicializa el cliente de búsqueda contra Pinecone utilizando variables de entorno locales.
-     */
     @BeforeAll
     static void setup() {
         String apiKey = System.getenv("PINECONE_API_KEY");
@@ -49,9 +47,6 @@ class PineconeSearchClientIntegrationTest {
         logger.info("Cliente de search listo contra {}", indexHost);
     }
 
-    /**
-     * Valida que la búsqueda devuelva hits con score, texto legible y metadatos del PDF de origen.
-     */
     @Test
     void searchReturnsRelevantChunksWithTextAndSourceMetadata() {
         // La pregunta debe relacionarse con los documentos indexados por la ingesta.
@@ -64,7 +59,7 @@ class PineconeSearchClientIntegrationTest {
             logger.info("Hit score={} source={} chunk={} id={}", hit.score(), hit.sourceKey(),
                     hit.chunkIndex(), hit.id());
             assertNotNull(hit.id(), "todo hit debe traer _id");
-            // PUNTO DE VERIFICACIÓN: el texto del chunk debe ser recuperable para RAG.
+            // PUNTO DE VERIFICACION: el texto de                       l chunk debe ser recuperable para RAG.
             assertNotNull(hit.text(), "el campo text no es recuperable en el search: "
                     + "si falla, el indice requiere stored=true en el field_map o "
                     + "duplicar el texto en metadata en la ingesta");

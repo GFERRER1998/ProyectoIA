@@ -14,7 +14,8 @@ El microservicio utiliza la tabla `rag-sessions` configurada en modo **On-Demand
 
 | Atributo | Tipo DynamoDB | Descripción |
 |---|---|---|
-| `session_id` | `S` (Partition Key) | Identificador único de la sesión (UUID) |
+| `session_id` | `S` (Partition Key) | Identificador aislado de la sesión (`user_id#client_session_id`) |
+| `user_id` | `S` | Identificador `sub` del usuario autenticado en Cognito |
 | `messages` | `L` (List de Maps) | Historial cronológico de mensajes de la sesión |
 | `created_at` | `S` (ISO-8601 UTC) | Marca temporal de creación de la sesión |
 | `updated_at` | `S` (ISO-8601 UTC) | Marca temporal de la última interacción |
@@ -62,10 +63,11 @@ sessionStore.appendTurn(sessionId, userMessage, assistantMessage);
 ```
 
 1. Recupera el ítem existente (o inicia una nueva lista si la sesión es nueva).
-2. Añade el mensaje del usuario y la respuesta del asistente.
-3. Aplica `trimHistory` para mantener el tamaño bajo control.
-4. Actualiza `updated_at` y preserva la fecha original `created_at`.
-5. Ejecuta `PutItem` en DynamoDB para guardar el estado actualizado.
+2. Guarda el `user_id` del token Cognito junto con la sesión.
+3. Añade el mensaje del usuario y la respuesta del asistente.
+4. Aplica `trimHistory` para mantener el tamaño bajo control.
+5. Actualiza `updated_at` y preserva la fecha original `created_at`.
+6. Ejecuta `PutItem` en DynamoDB para guardar el estado actualizado.
 
 ## Conversión de Datos (Serialización)
 

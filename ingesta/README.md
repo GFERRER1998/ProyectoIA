@@ -106,5 +106,5 @@ Salidas del stack: ARN de la Lambda y nombre del bucket.
 
 - API Gateway + Lambda de consulta (RAG con LLM).
 - DynamoDB (historial de conversaciones).
-- Cognito (autenticación).
+- Cognito (autenticación de `consulta/`, implementado).
 - Embeddings/LLM vía Grok API (hoy los embeddings los genera Pinecone internamente).

@@ -3,7 +3,7 @@
 ## Resumen General
 Esta arquitectura describe un sistema de Generación Aumentada por Recuperación (RAG) serverless implementado en AWS. El sistema consta de dos flujos principales: el **Flujo de Ingestión e Indexación de Documentos** (implementado) y el **Flujo de Consulta / Respuesta (RAG)** (futuro), apoyados por servicios auxiliares de la nube.
 
-> Estado: **ingestión completa y verificada (v1)**. **Consulta RAG implementada y verificada (v2, ver `consulta/`)**. Cognito y API Gateway son fases futuras.
+> Estado: **ingestión completa y verificada (v1)**. **Consulta RAG implementada y verificada (v2, ver `consulta/`)**. La autenticación Cognito está implementada en `consulta/`; API Gateway permanece fuera de alcance.
 
 ---
 
@@ -37,7 +37,7 @@ Esta arquitectura describe un sistema de Generación Aumentada por Recuperación
 
 ## Servicios de Apoyo y Seguridad
 
-* **Amazon Cognito:** *(futuro)* gestión de identidad y autenticación de usuarios.
+* **Amazon Cognito:** User Pool y App Client implementados en `consulta/`; la Lambda valida ID Tokens mediante JWKS.
 * **Amazon CloudWatch (implementado):** logs de la Lambda (grupo `/aws/lambda/pdf-extractor-lambda-stac-PdfTextExtractorFunction-*`).
 * **AWS Secrets Manager (implementado):** secreto `pinecone/pdf-extractor` con la API key (`{"apiKey":"..."}`); la Lambda solo tiene `secretsmanager:GetSecretValue` sobre ese ARN.
 * **Amazon EventBridge:** *(futuro)* programación de tareas periódicas, eventos asíncronos y reindexación.

@@ -24,7 +24,7 @@ import java.util.Map;
  * <p>Para evitar un crecimiento ilimitado que sature la ventana de contexto del LLM y aumente costos,
  * el historial se recorta automáticamente a los últimos <em>N</em> turnos más recientes (FIFO).</p>
  */
-public final class SessionStore {
+public class SessionStore {
 
     private static final Logger logger = LoggerFactory.getLogger(SessionStore.class);
     // Cantidad por defecto de turnos (pares usuario-asistente) que se conservan en memoria.
@@ -100,8 +100,13 @@ public final class SessionStore {
      * @param sessionId Identificador de la sesión.
      * @param userMessage Mensaje enviado por el usuario.
      * @param assistantMessage Respuesta generada por el asistente LLM.
+     * @param userId Identificador {@code sub} del usuario autenticado en Cognito.
      */
-    public void appendTurn(String sessionId, ChatMessage userMessage, ChatMessage assistantMessage) {
+    public void appendTurn(String sessionId, String userId, ChatMessage userMessage,
+                           ChatMessage assistantMessage) {
+        if (sessionId == null || sessionId.isBlank() || userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("Session id and user id are required");
+        }
         Map<String, AttributeValue> existing = getItem(sessionId);
         List<ChatMessage> history;
         if (existing == null) {
@@ -121,6 +126,7 @@ public final class SessionStore {
 
         Map<String, AttributeValue> item = new HashMap<>();
         item.put("session_id", AttributeValue.builder().s(sessionId).build());
+        item.put("user_id", AttributeValue.builder().s(userId).build());
         item.put("messages", toMessagesAttribute(history));
         item.put("created_at", AttributeValue.builder().s(createdAt).build());
         item.put("updated_at", AttributeValue.builder().s(Instant.now().toString()).build());

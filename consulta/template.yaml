@@ -33,8 +33,80 @@ Parameters:
     Type: String
     Default: "*"
     Description: Origen(es) permitidos por CORS, separados por coma (ej. "*" o "https://app.com,http://localhost:5173")
+  # Parametros opcionales de Cognito (si no se pasan se crean UserPool y AppClient nuevos)
+  CognitoUserPoolName:
+    Type: String
+    Default: rag-user-pool
+    Description: Nombre del User Pool de Cognito para autenticacion de usuarios
+  CognitoMfaEnabled:
+    Type: String
+    Default: "OFF"
+    AllowedValues: ["OFF", "OPTIONAL"]
+    Description: "OFF = sin MFA, OPTIONAL = MFA disponible por usuario"
 
 Resources:
+  # -------------------------------------------------------------------------
+  # User Pool de Cognito: directorio de usuarios con verificacion de email.
+  # Emite ID Tokens (JWT RS256) que la Lambda verifica en cada request.
+  # -------------------------------------------------------------------------
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Ref CognitoUserPoolName
+      # El email es el atributo de login y se verifica automaticamente.
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      # Politica de contrasenas robusta.
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      MfaConfiguration: !Ref CognitoMfaEnabled
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: false
+      AdminCreateUserConfig:
+        # Permite que los usuarios se registren solos (sin que un admin los cree).
+        AllowAdminCreateUserOnly: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+  # -------------------------------------------------------------------------
+  # App Client publico (sin client_secret): usado por SPA / apps moviles.
+  # Flujos habilitados: USER_SRP_AUTH (login normal) + REFRESH_TOKEN_AUTH.
+  # -------------------------------------------------------------------------
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: rag-app-client
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      # Solo flujos seguros: SRP (password sin enviar en claro) y refresh token.
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+      # Validez de los tokens.
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+
   # -------------------------------------------------------------------------
   # Tabla de sesiones: una fila por sesion de chat con el historial completo.
   # Facturacion on-demand (pay per request), ideal para uso esporadico.
@@ -76,6 +148,9 @@ Resources:
           OPENROUTER_SECRET_ARN: !Ref OpenRouterSecretArn
           OPENROUTER_MODEL: !Ref OpenRouterModel
           SESSIONS_TABLE: !Ref SessionsTable
+          # IDs del User Pool y App Client inyectados para validacion JWT en-process.
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
       Policies:
         - Statement:
             - Effect: Allow
@@ -98,6 +173,7 @@ Resources:
             - POST
           AllowHeaders:
             - Content-Type
+            - Authorization
 
 Outputs:
   QueryFunctionUrl:
@@ -106,3 +182,12 @@ Outputs:
   SessionsTableName:
     Description: "Tabla DynamoDB de sesiones"
     Value: !Ref SessionsTable
+  UserPoolId:
+    Description: "ID del User Pool de Cognito (para configurar el frontend)"
+    Value: !Ref UserPool
+  AppClientId:
+    Description: "ID del App Client de Cognito (para configurar el frontend)"
+    Value: !Ref UserPoolClient
+  UserPoolProviderUrl:
+    Description: "URL del proveedor OIDC del User Pool (para validacion de tokens)"
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"

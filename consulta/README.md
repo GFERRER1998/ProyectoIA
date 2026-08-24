@@ -3,7 +3,7 @@
 Pipeline serverless de consulta RAG: recibe preguntas, recupera los chunks más relevantes de Pinecone, genera la respuesta con un LLM vía OpenRouter y guarda las sesiones en DynamoDB.
 
 ```
-Usuario ──POST──> Lambda Function URL (gratis) ──> QueryHandler (Java 17)
+Usuario ──POST + ID Token──> Lambda Function URL (gratis) ──> QueryHandler (Java 17)
                         │
                         ├─ PineconeSearchClient: búsqueda vectorial (top_k chunks + score)
                         ├─ RagContextBuilder: prompt RAG (sistema + contexto + historial + pregunta)
@@ -16,6 +16,7 @@ Usuario ──POST──> Lambda Function URL (gratis) ──> QueryHandler (Jav
 | Componente | Rol |
 |---|---|
 | **Lambda Function URL** | Punto de entrada HTTPS público, costo $0 por request (payload v2, `APIGatewayV2HTTPEvent`) |
+| **Amazon Cognito** | User Pool y App Client; la Lambda valida manualmente los ID Tokens JWT |
 | **Lambda `QueryFunction`** (Java 17, 1024 MB, timeout 60s) | Orquesta recuperación + generación + sesión |
 | **Pinecone** `rag-index` / namespace `documents-dev` | Búsqueda vectorial sobre los chunks indexados por `ingesta/` (search por texto, campo `text`) |
 | **OpenRouter** (modelo `:free`) | LLM para generar respuestas RAG con citas de fuente |
@@ -33,6 +34,7 @@ Usuario ──POST──> Lambda Function URL (gratis) ──> QueryHandler (Jav
 ```bash
 curl -X POST "https://<FUNCTION_URL>/" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ID_TOKEN>" \
   -d '{"question":"que es la atencion?","session_id":"opcional"}'
 ```
 
@@ -47,8 +49,8 @@ Respuesta:
 }
 ```
 
-- Sin `session_id` se crea una sesión nueva; reenviando el mismo `session_id` el LLM recibe el historial (últimos 6 turnos por defecto).
-- Errores: `400` (body inválido / falta `question`), `502` (Pinecone/OpenRouter/DynamoDB).
+- Sin `session_id` se crea una sesión nueva; reenviando el mismo `session_id` el LLM recibe el historial (últimos 6 turnos por defecto). La sesión queda aislada por el `sub` de Cognito.
+- Errores: `401` (JWT ausente o inválido), `400` (body inválido / falta `question`), `502` (Pinecone/OpenRouter/DynamoDB).
 
 ## Configuración de la Lambda (variables de entorno)
 
@@ -59,6 +61,7 @@ Respuesta:
 | `OPENROUTER_MODEL` | Parámetro CloudFormation (default `nvidia/nemotron-3-ultra-550b-a55b:free`) | Modelo LLM |
 | `SESSIONS_TABLE` | CloudFormation | Nombre de la tabla DynamoDB |
 | `PINECONE_TOP_K` / `HISTORY_TURNS` | Opcionales (defaults 5 / 6) | Chunks por consulta y turnos de historial |
+| `COGNITO_USER_POOL_ID` / `COGNITO_APP_CLIENT_ID` | CloudFormation | Identificadores usados para validar JWT |
 
 ## Secretos
 
@@ -88,7 +91,7 @@ sam deploy --region us-east-1 \
      OpenRouterModel=nvidia/nemotron-3-ultra-550b-a55b:free"
 ```
 
-Salidas del stack: URL de la función y nombre de la tabla de sesiones.
+Salidas del stack: URL de la función, nombre de la tabla, User Pool, App Client y provider URL.
 
 ## Verificación
 
@@ -102,4 +105,4 @@ Salidas del stack: URL de la función y nombre de la tabla de sesiones.
 ## Notas
 
 - Si el modelo free responde `429`, espera para la siguiente consulta (límites del tier gratuito).
-- CORS configurable por parámetro `CorsAllowedOrigins` (default `*`); `AuthType: NONE` es apto para desarrollo — en producción considera `AWS_IAM`, API Gateway o WAF.
+- CORS configurable por parámetro `CorsAllowedOrigins` (default `*`). `AuthType: NONE` es necesario para la validación JWT dentro de la Lambda; restringe los orígenes en producción.

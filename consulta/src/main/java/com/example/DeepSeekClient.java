@@ -30,7 +30,7 @@ import java.util.List;
  * {@code POST /chat/completions}. El modelo a utilizar se configura dinámicamente mediante
  * variables de entorno (los modelos del tier gratuito finalizan con el sufijo {@code :free}).</p>
  */
-public final class DeepSeekClient {
+public class DeepSeekClient {
 
     private static final Logger logger = LoggerFactory.getLogger(DeepSeekClient.class);
     static final String DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";

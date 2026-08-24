@@ -30,7 +30,7 @@ import java.util.List;
  * Pinecone vectoriza la consulta del lado del servidor y calcula la similitud con los vectores almacenados,
  * retornando los fragmentos con mayor score de relevancia.</p>
  */
-public final class PineconeSearchClient {
+public class PineconeSearchClient {
 
     private static final Logger logger = LoggerFactory.getLogger(PineconeSearchClient.class);
     // Versión fija del contrato REST que utiliza el índice de Pinecone.

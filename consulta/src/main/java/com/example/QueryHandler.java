@@ -22,9 +22,15 @@ import java.util.UUID;
  * (formato de payload v2 / {@link APIGatewayV2HTTPEvent}), recibiendo peticiones HTTP POST
  * con preguntas de usuario en formato JSON.</p>
  *
+ * <p><strong>Autenticación:</strong> Requiere un ID Token de Amazon Cognito válido en el
+ * header {@code Authorization: Bearer <token>}. Peticiones sin token o con token inválido
+ * reciben {@code HTTP 401 Unauthorized}.</p>
+ *
  * <p>Flujo de ejecución:
  * <ol>
+ *   <li>Verifica el token JWT de Cognito ({@link CognitoJwtVerifier}) y extrae el {@code sub} (user_id).</li>
  *   <li>Parsea y valida el cuerpo JSON de la petición ({@code {"question":"...", "session_id":"..."}}).</li>
+ *   <li>Construye el ID de sesión completo como {@code {sub}#{session_id}} para aislar sesiones por usuario.</li>
  *   <li>Recupera el historial previo de conversación desde DynamoDB ({@link SessionStore}).</li>
  *   <li>Realiza búsqueda semántica en Pinecone ({@link PineconeSearchClient}) para obtener los chunks relevantes.</li>
  *   <li>Construye el prompt contextualizado con instrucciones estrictas y citas de fuentes ({@link RagContextBuilder}).</li>
@@ -42,28 +48,34 @@ public class QueryHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
     private final PineconeSearchClient searchClient;
     private final DeepSeekClient llmClient;
     private final SessionStore sessionStore;
+    private final CognitoJwtVerifier jwtVerifier;
 
     /**
      * Constructor por defecto utilizado por el entorno de ejecución de AWS Lambda en producción.
-     * Carga todos los clientes y secretos a partir de las variables de entorno.
+     * Carga todos los clientes y secretos a partir de las variables de entorno,
+     * incluyendo el verificador JWT de Amazon Cognito.
      */
     public QueryHandler() {
         this(PineconeSearchClient.fromEnvironment(),
                 DeepSeekClient.fromEnvironment(),
-                SessionStore.fromEnvironment());
+                SessionStore.fromEnvironment(),
+                CognitoJwtVerifier.fromEnvironment());
     }
 
     /**
      * Constructor con inyección de dependencias para testing unitario e integración.
      *
      * @param searchClient Cliente de búsqueda en Pinecone.
-     * @param llmClient Cliente de comunicación con el LLM en OpenRouter.
+     * @param llmClient    Cliente de comunicación con el LLM en OpenRouter.
      * @param sessionStore Almacén de sesiones en DynamoDB.
+     * @param jwtVerifier  Verificador de tokens JWT de Amazon Cognito.
      */
-    QueryHandler(PineconeSearchClient searchClient, DeepSeekClient llmClient, SessionStore sessionStore) {
+    QueryHandler(PineconeSearchClient searchClient, DeepSeekClient llmClient,
+                 SessionStore sessionStore, CognitoJwtVerifier jwtVerifier) {
         this.searchClient = searchClient;
         this.llmClient = llmClient;
         this.sessionStore = sessionStore;
+        this.jwtVerifier = jwtVerifier;
     }
 
     /**
@@ -76,23 +88,37 @@ public class QueryHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
     @Override
     public APIGatewayV2HTTPResponse handleRequest(APIGatewayV2HTTPEvent event, Context context) {
         try {
+            // Paso 1: Verificar el token JWT de Cognito. Devuelve HTTP 401 si está ausente o es inválido.
+            String authHeader = authorizationHeader(event);
+            String userId;
+            try {
+                userId = jwtVerifier.verify(authHeader);
+            } catch (UnauthorizedException e) {
+                logger.warn("Acceso denegado: {}", e.getMessage());
+                return buildErrorResponse(401, "No autenticado. Se requiere un token JWT de Cognito valido.");
+            }
+
+            // Paso 2: Parsear y validar el cuerpo JSON de la petición.
             QueryRequest request = parseRequest(event);
             if (request.question() == null || request.question().isBlank()) {
                 return buildErrorResponse(400, "Falta el campo 'question' en el body JSON.");
             }
 
-            // Si el cliente no envía session_id se genera un nuevo UUID para iniciar una sesión limpia.
-            String sessionId = request.sessionId() == null || request.sessionId().isBlank()
+            // Paso 3: Construir el ID de sesión combinando el user_id con el session_id del cliente.
+            // Formato: "{sub}#{session_id}" — asegura que los usuarios no accedan a sesiones ajenas.
+            String clientSessionId = request.sessionId() == null || request.sessionId().isBlank()
                     ? UUID.randomUUID().toString() : request.sessionId();
+            String sessionId = userId + "#" + clientSessionId;
 
             List<ChatMessage> history = sessionStore.loadSession(sessionId);
             List<com.example.PineconeSearchClient.SearchHit> hits = searchClient.search(request.question());
             List<ChatMessage> messages = RagContextBuilder.buildMessages(request.question(), hits, history);
             String answer = llmClient.chat(messages);
-            sessionStore.appendTurn(sessionId, ChatMessage.user(request.question()), ChatMessage.assistant(answer));
+            sessionStore.appendTurn(sessionId, userId,
+                    ChatMessage.user(request.question()), ChatMessage.assistant(answer));
 
-            logger.info("Consulta completada exitosamente. session={} hits={}", sessionId, hits.size());
-            return buildSuccessResponse(sessionId, answer, RagContextBuilder.buildSources(hits), llmClient.model());
+            logger.info("Consulta completada. user={} session={} hits={}", userId, clientSessionId, hits.size());
+            return buildSuccessResponse(clientSessionId, answer, RagContextBuilder.buildSources(hits), llmClient.model());
 
         } catch (IllegalArgumentException e) {
             // Error de validación o sintaxis imputable al cliente: se retorna HTTP 400.
@@ -128,6 +154,18 @@ public class QueryHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
         }
     }
 
+    /** Obtiene Authorization sin depender de la capitalización usada por el proxy HTTP. */
+    private static String authorizationHeader(APIGatewayV2HTTPEvent event) {
+        if (event == null || event.getHeaders() == null) {
+            return null;
+        }
+        return event.getHeaders().entrySet().stream()
+                .filter(entry -> entry.getKey() != null && "authorization".equalsIgnoreCase(entry.getKey()))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
+    }
+
     /**
      * Construye una respuesta HTTP 200 OK con el resultado de la consulta.
      *
@@ -154,6 +192,15 @@ public class QueryHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
      * @param message Mensaje explicativo del error.
      * @return Objeto {@link APIGatewayV2HTTPResponse} con estructura {@code {"error":"..."}}.
      */
+    /**
+     * Construye una respuesta HTTP 401 Unauthorized estándar.
+     *
+     * @return Respuesta con mensaje de error de autenticación.
+     */
+    static APIGatewayV2HTTPResponse buildUnauthorizedResponse() {
+        return buildErrorResponse(401, "No autenticado. Se requiere un token JWT de Cognito valido.");
+    }
+
     static APIGatewayV2HTTPResponse buildErrorResponse(int status, String message) {
         JsonObject json = new JsonObject();
         json.addProperty("error", message);

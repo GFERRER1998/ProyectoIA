@@ -5,7 +5,7 @@ Sistema de Generación Aumentada por Recuperación (RAG) serverless en AWS, divi
 ```
 ProyectoIA/
 ├── ingesta/    ← Ingestión e indexación de documentos (IMPLEMENTADO)
-└── consulta/   ← Consulta RAG con LLM (IMPLEMENTADO)
+└── consulta/   ← Consulta RAG con LLM y Cognito (IMPLEMENTADO)
 ```
 
 ## Microservicios
@@ -13,7 +13,7 @@ ProyectoIA/
 | Microservicio | Estado | Stack | Descripción |
 |---|---|---|---|
 | `ingesta/` | Implementado y verificado | S3 → Lambda (Java 17) → Pinecone | Convierte PDFs en vectores semánticos (chunks con embedding integrado de Pinecone) |
-| `consulta/` | Implementado y verificado | Lambda Function URL (Java 17) → Pinecone + OpenRouter + DynamoDB | Consultas RAG: búsqueda vectorial, contexto a LLM, sesiones de usuario |
+| `consulta/` | Implementado y verificado | Lambda Function URL + Cognito (Java 17) → Pinecone + OpenRouter + DynamoDB | Consultas RAG autenticadas: búsqueda vectorial, contexto a LLM, sesiones aisladas por usuario |
 
 ## Comandos
 
@@ -45,6 +45,7 @@ sam build && sam deploy ...   # despliegue del stack de ingesta
 |---|---|
 | [`consulta/README.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/README.md) | Guía principal del microservicio de consulta RAG |
 | [`consulta/QueryHandler.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/QueryHandler.md) | Handler de Function URL, ciclo de vida de consulta y respuestas |
+| [`consulta/CognitoJwtVerifier.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/CognitoJwtVerifier.md) | Autenticación Cognito, ID Tokens, JWKS y sesiones aisladas |
 | [`consulta/PineconeSearchClient.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/PineconeSearchClient.md) | Búsqueda vectorial semántica sobre chunks indexados |
 | [`consulta/DeepSeekClient.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/DeepSeekClient.md) | Invocación de LLMs en OpenRouter (modelos free, reintentos y 429) |
 | [`consulta/RagContextBuilder.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/RagContextBuilder.md) | Construcción de prompt RAG con citas explícitas `[Fuente N]` |

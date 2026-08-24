@@ -7,7 +7,7 @@
 Coordina el ciclo de vida completo de una consulta:
 
 ```text
-HTTP POST (JSON) -> Validar -> Historial DynamoDB -> Búsqueda Pinecone -> Prompt RAG -> Invocación LLM -> Guardar Sesión -> HTTP 200 (JSON)
+HTTP POST (JSON) -> JWT Cognito -> Validar -> Historial DynamoDB -> Búsqueda Pinecone -> Prompt RAG -> Invocación LLM -> Guardar Sesión -> HTTP 200 (JSON)
 ```
 
 ## Arquitectura y Responsabilidades
@@ -28,6 +28,11 @@ HTTP POST (JSON) -> Validar -> Historial DynamoDB -> Búsqueda Pinecone -> Promp
 
 El método `handleRequest` recibe un `APIGatewayV2HTTPEvent` generado por la Function URL.
 
+Antes de procesar el body, busca el header `Authorization` sin depender de su
+capitalización y exige el formato `Bearer <ID_TOKEN>`. `CognitoJwtVerifier`
+valida firma, issuer, App Client, `token_use=id`, `sub` y expiración. Si falla,
+retorna `401` y no invoca servicios externos.
+
 El cuerpo de la petición se valida mediante `parseRequest`:
 
 ```json
@@ -42,7 +47,10 @@ El cuerpo de la petición se valida mediante `parseRequest`:
 
 ### 2. Se recupera el historial de la sesión
 
-Consulta `SessionStore.loadSession(sessionId)`. Si la sesión ya existe, devuelve los turnos previos (recortados a los últimos N turnos configurados, por defecto 6). Si es nueva, devuelve una lista vacía.
+La clave interna se forma como `{sub}#{session_id}`. Consulta
+`SessionStore.loadSession(sessionId)`. Si la sesión ya existe, devuelve los
+turnos previos (recortados a los últimos N turnos configurados, por defecto 6).
+Si es nueva, devuelve una lista vacía.
 
 ### 3. Se ejecuta la búsqueda vectorial en Pinecone
 
@@ -61,7 +69,7 @@ Invoca `searchClient.search(question)`. Pinecone vectoriza la pregunta y devuelv
 
 ### 6. Se persiste el turno en DynamoDB
 
-`sessionStore.appendTurn(sessionId, userMessage, assistantMessage)` registra el par pregunta-respuesta en la tabla `rag-sessions` con marcas de tiempo `created_at` y `updated_at`.
+`sessionStore.appendTurn(sessionId, userId, userMessage, assistantMessage)` registra el par pregunta-respuesta en la tabla `rag-sessions` con `user_id` y marcas de tiempo `created_at` y `updated_at`.
 
 ### 7. Se retorna la respuesta estructurada
 
@@ -86,6 +94,7 @@ Devuelve un `APIGatewayV2HTTPResponse` con código `200 OK`, `Content-Type: appl
 
 | Código | Condición | Respuesta |
 |---|---|---|
+| `401 Unauthorized` | Header ausente o JWT de Cognito inválido | `{"error": "No autenticado. Se requiere un token JWT de Cognito valido."}` |
 | `200 OK` | Consulta completada con éxito | JSON con `answer`, `sources`, `session_id`, `model` |
 | `400 Bad Request` | Body JSON inválido o ausencia del campo obligatorio `question` | `{"error": "Falta el campo 'question' en el body JSON."}` |
 | `502 Bad Gateway` | Falla no recuperable en Pinecone, OpenRouter o DynamoDB | `{"error": "Error interno procesando la consulta."}` (detalle completo en CloudWatch Logs) |
@@ -108,4 +117,5 @@ Cuando una IA analice o modifique este archivo debe considerar:
 
 - **Orquestación Pura**: No mover lógica detallada de HTTP, parsing de respuestas de Pinecone o construcción de prompts dentro de `QueryHandler`; mantener la delegación a sus clases correspondientes.
 - **Seguridad**: Los errores 502 nunca deben exponer trazas de excepciones internas, ARNs de secretos ni datos crudos de bases de datos al cliente HTTP; los detalles siempre van a `logger.error`.
-- **Sesiones**: El soporte de memoria conversacional depende de la persistencia de `session_id`. Si se añade autenticación (Cognito), `session_id` podrá asociarse a un `user_id`.
+- **Sesiones**: El soporte de memoria conversacional depende de la persistencia de `session_id`, aislada mediante el `user_id` de Cognito.
+- **Autenticación**: La Function URL conserva `AuthType: NONE`, pero ningún flujo RAG se ejecuta sin un ID Token Cognito válido.

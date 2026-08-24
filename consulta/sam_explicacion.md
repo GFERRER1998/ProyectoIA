@@ -33,6 +33,8 @@ Permite parametrizar el despliegue (`--parameter-overrides`) sin hardcodear cred
 | `OpenRouterSecretArn` | String | ARN del secreto en Secrets Manager con la API Key de OpenRouter | *(Obligatorio)* |
 | `OpenRouterModel` | String | Identificador del modelo LLM a utilizar | `nvidia/nemotron-3-ultra-550b-a55b:free` |
 | `CorsAllowedOrigins` | String | Orígenes HTTP permitidos para CORS (separados por coma) | `*` |
+| `CognitoUserPoolName` | String | Nombre del User Pool de autenticación | `rag-user-pool` |
+| `CognitoMfaEnabled` | String | MFA opcional (`OFF` u `OPTIONAL`) | `OFF` |
 
 ---
 
@@ -57,9 +59,21 @@ SessionsTable:
 - **`KeySchema`**: Partition Key única `session_id` (String).
 - **`SSESpecification`**: cifrado en reposo habilitado con claves administradas por AWS (SSE).
 
+El atributo `user_id` guarda el `sub` de Cognito. La clave `session_id` queda
+aislada por usuario con el formato `{sub}#{session_id-del-cliente}`.
+
 ---
 
-### 4. La Función Lambda (`QueryFunction`)
+### 4. Amazon Cognito (`UserPool` y `UserPoolClient`)
+
+El stack crea un User Pool con login por email y verificación automática. El App
+Client es público y no tiene secreto. La Lambda recibe `COGNITO_USER_POOL_ID` y
+`COGNITO_APP_CLIENT_ID` para validar los ID Tokens mediante JWKS. No se utiliza
+Identity Pool ni API Gateway.
+
+---
+
+### 5. La Función Lambda (`QueryFunction`)
 
 ```yaml
 QueryFunction:
@@ -94,6 +108,8 @@ Environment:
     OPENROUTER_SECRET_ARN: !Ref OpenRouterSecretArn
     OPENROUTER_MODEL: !Ref OpenRouterModel
     SESSIONS_TABLE: !Ref SessionsTable
+    COGNITO_USER_POOL_ID: !Ref UserPool
+    COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
 ```
 
 #### Políticas de Seguridad IAM (Principle of Least Privilege)
@@ -131,6 +147,7 @@ FunctionUrlConfig:
       - POST
     AllowHeaders:
       - Content-Type
+      - Authorization
 ```
 
 - Proporciona un endpoint HTTPS directo administrado por AWS sin necesidad de aprovisionar un API Gateway (costo $0 por invocación).
@@ -138,7 +155,7 @@ FunctionUrlConfig:
 
 ---
 
-### 5. Salidas (Outputs)
+### 6. Salidas (Outputs)
 
 ```yaml
 Outputs:
@@ -151,6 +168,9 @@ Outputs:
 ```
 
 Al finalizar el comando `sam deploy`, SAM imprime la URL HTTPS pública generada y el nombre de la tabla DynamoDB creada.
+
+También imprime `UserPoolId`, `AppClientId` y `UserPoolProviderUrl`, necesarios
+para configurar el frontend y verificar el issuer de los tokens.
 
 ---
 
