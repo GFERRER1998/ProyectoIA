@@ -148,7 +148,7 @@ Frontend ──GET/DELETE──> SessionFunction ──> DynamoDB SessionsTable 
 10. UploadUrlFunction / DocumentsFunction / QueryFunction / SessionFunction → Cognito JWKS (verificación JWT HTTPS)
 11. PdfTextExtractorFunction → S3 (GetObject)
 12. PdfTextExtractorFunction → DocumentsTable (UpdateItem)
-13. PdfTextExtractorFunction  li→ Secrets Manager (API key Pinecone)
+13. PdfTextExtractorFunction  li  → Secrets Manager (API key Pinecone)
 14. PdfTextExtractorFunction → Pinecone (upsert NDJSON)
 15. DocumentsFunction → S3 (DeleteObject) y → DocumentsTable (GetItem/Query/DeleteItem)
 16. QueryFunction → Secrets Manager (keys Pinecone + OpenRouter)
