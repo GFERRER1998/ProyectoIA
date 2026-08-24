@@ -5,8 +5,13 @@ Sistema de Generación Aumentada por Recuperación (RAG) serverless en AWS, divi
 ```
 ProyectoIA/
 ├── ingesta/    ← Ingestión e indexación de documentos (IMPLEMENTADO)
-└── consulta/   ← Consulta RAG con LLM y Cognito (IMPLEMENTADO)
+├── consulta/   ← Consulta RAG con LLM y Cognito (IMPLEMENTADO)
+└── frontend/   ← Cliente web Next.js + Amplify Auth (IMPLEMENTADO)
 ```
+
+| Frontend | Estado | Stack | Descripción |
+|---|---|---|---|
+| `frontend/` | Implementado y verificado | Next.js 15 + AWS Amplify Auth (Cognito) | Chat RAG con documentos, historial y rutas protegidas |
 
 ## Microservicios
 
@@ -31,25 +36,35 @@ sam build && sam deploy ...   # despliegue del stack de ingesta
 
 | Documento | Descripción |
 |---|---|
-| [`ingesta/README.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/ingesta/README.md) | Guía principal del microservicio de ingesta |
-| [`ingesta/PdfTextExtractor.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/ingesta/PdfTextExtractor.md) | Orquestación Lambda, eventos S3 y extracción PDFBox |
-| [`ingesta/PineconeClient.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/ingesta/PineconeClient.md) | Persistencia de chunks y embeddings integrados en Pinecone |
-| [`ingesta/TextChunker.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/ingesta/TextChunker.md) | Limpieza de texto, normalización y algoritmo de chunking |
-| [`ingesta/sam_explicacion.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/ingesta/sam_explicacion.md) | Detalle de infraestructura SAM (`template.yaml` y `samconfig.toml`) |
-| [`ingesta/ContextIA.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/ingesta/ContextIA.md) | Contexto de arquitectura general y flujos RAG |
-| [`ingesta/ContextoIAWS.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/ingesta/ContextoIAWS.md) | Inventario de recursos de AWS del stack de ingesta |
+| [`ingesta/README.md`](ingesta/README.md) | Guía principal del microservicio de ingesta |
+| [`ingesta/PdfTextExtractor.md`](ingesta/PdfTextExtractor.md) | Orquestación Lambda, eventos S3 y extracción PDFBox |
+| [`ingesta/PineconeClient.md`](ingesta/PineconeClient.md) | Persistencia de chunks y embeddings integrados en Pinecone |
+| [`ingesta/TextChunker.md`](ingesta/TextChunker.md) | Limpieza de texto, normalización y algoritmo de chunking |
+| [`ingesta/sam_explicacion.md`](ingesta/sam_explicacion.md) | Detalle de infraestructura SAM (`template.yaml` y `samconfig.toml`) |
+| [`ingesta/ContextIA.md`](ingesta/ContextIA.md) | Contexto de arquitectura general y flujos RAG |
+| [`ingesta/ContextoIAWS.md`](ingesta/ContextoIAWS.md) | Inventario de recursos de AWS del stack de ingesta |
 
 ### Microservicio de Consulta (`consulta/`)
 
 | Documento | Descripción |
 |---|---|
-| [`consulta/README.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/README.md) | Guía principal del microservicio de consulta RAG |
-| [`consulta/QueryHandler.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/QueryHandler.md) | Handler de Function URL, ciclo de vida de consulta y respuestas |
-| [`consulta/CognitoJwtVerifier.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/CognitoJwtVerifier.md) | Autenticación Cognito, ID Tokens, JWKS y sesiones aisladas |
-| [`consulta/PineconeSearchClient.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/PineconeSearchClient.md) | Búsqueda vectorial semántica sobre chunks indexados |
-| [`consulta/DeepSeekClient.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/DeepSeekClient.md) | Invocación de LLMs en OpenRouter (modelos free, reintentos y 429) |
-| [`consulta/RagContextBuilder.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/RagContextBuilder.md) | Construcción de prompt RAG con citas explícitas `[Fuente N]` |
-| [`consulta/SessionStore.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/SessionStore.md) | Persistencia de historial conversacional y recorte FIFO en DynamoDB |
-| [`consulta/sam_explicacion.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/sam_explicacion.md) | Detalle de infraestructura SAM de consulta (Function URL, DynamoDB) |
-| [`consulta/ContextIA.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/ContextIA.md) | Contexto de arquitectura del flujo de consulta y directivas para IA |
-| [`consulta/ContextoIAWS.md`](file:///c:/Users/gnzlf/Desktop/ProyectoIA/consulta/ContextoIAWS.md) | Inventario de recursos de AWS del stack de consulta |
+| [`consulta/README.md`](consulta/README.md) | Guía principal del microservicio de consulta RAG |
+| [`consulta/QueryHandler.md`](consulta/QueryHandler.md) | Handler de Function URL, ciclo de vida de consulta y respuestas |
+| [`consulta/CognitoJwtVerifier.md`](consulta/CognitoJwtVerifier.md) | Autenticación Cognito, ID Tokens, JWKS y sesiones aisladas |
+| [`consulta/PineconeSearchClient.md`](consulta/PineconeSearchClient.md) | Búsqueda vectorial semántica sobre chunks indexados |
+| [`consulta/DeepSeekClient.md`](consulta/DeepSeekClient.md) | Invocación de LLMs en OpenRouter (modelos free, reintentos y 429) |
+| [`consulta/RagContextBuilder.md`](consulta/RagContextBuilder.md) | Construcción de prompt RAG con citas explícitas `[Fuente N]` |
+| [`consulta/SessionStore.md`](consulta/SessionStore.md) | Persistencia de historial conversacional y recorte FIFO en DynamoDB |
+| [`consulta/sam_explicacion.md`](consulta/sam_explicacion.md) | Detalle de infraestructura SAM de consulta (Function URL, DynamoDB) |
+| [`consulta/ContextIA.md`](consulta/ContextIA.md) | Contexto de arquitectura del flujo de consulta y directivas para IA |
+| [`consulta/ContextoIAWS.md`](consulta/ContextoIAWS.md) | Inventario de recursos de AWS del stack de consulta |
+
+### Frontend (`frontend/`)
+
+| Documento | Descripción |
+|---|---|
+| [`frontend/README.md`](frontend/README.md) | Guía principal del cliente web |
+
+## Licencia
+
+Este proyecto se publica con fines educativos y de portafolio.
