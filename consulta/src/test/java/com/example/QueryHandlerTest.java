@@ -172,6 +172,24 @@ class QueryHandlerTest {
         assertThrows(IllegalArgumentException.class, () -> QueryHandler.parseRequest(event));
     }
 
+    @Test
+    void parseRequestRejectsOversizedQuestion() {
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+                .withBody("{\"question\":\"" + "x".repeat(12_001) + "\"}")
+                .build();
+
+        assertThrows(IllegalArgumentException.class, () -> QueryHandler.parseRequest(event));
+    }
+
+    @Test
+    void parseRequestRejectsInvalidSessionId() {
+        APIGatewayV2HTTPEvent event = APIGatewayV2HTTPEvent.builder()
+                .withBody("{\"question\":\"hola\",\"session_id\":\"bad#id\"}")
+                .build();
+
+        assertThrows(IllegalArgumentException.class, () -> QueryHandler.parseRequest(event));
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Tests de respuestas estáticas
     // ─────────────────────────────────────────────────────────────────────────

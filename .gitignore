@@ -1,5 +1,8 @@
 # Secretos y credenciales locales
 .env
+.env.*
+!.env.example
+!.env.*.example
 
 # Build de Maven
 target/

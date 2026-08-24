@@ -143,7 +143,7 @@ public class PineconeSearchClient {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
                 int status = response.statusCode();
                 if (status >= 200 && status < 300) {
-                    List<SearchHit> hits = parseSearchResponse(response.body());
+                    List<SearchHit> hits = parseSearchResponse(response.body(), textField);
                     logger.info("Pinecone search completado exitosamente. Hits encontrados: {}", hits.size());
                     return hits;
                 }
@@ -199,10 +199,16 @@ public class PineconeSearchClient {
      * @return Lista de objetos {@link SearchHit} extraídos.
      */
     static List<SearchHit> parseSearchResponse(String body) {
+        return parseSearchResponse(body, "text");
+    }
+
+    /** Interpreta una respuesta usando el campo de texto configurado para el índice. */
+    static List<SearchHit> parseSearchResponse(String body, String textField) {
         List<SearchHit> hits = new ArrayList<>();
         if (body == null || body.isBlank()) {
             return hits;
         }
+        String resolvedTextField = textField == null || textField.isBlank() ? "text" : textField;
         JsonObject root = JsonParser.parseString(body).getAsJsonObject();
         JsonArray array = null;
         if (root.has("result") && root.getAsJsonObject("result").has("hits")) {
@@ -218,7 +224,7 @@ public class PineconeSearchClient {
             JsonObject fields = hit.has("fields") ? hit.getAsJsonObject("fields") : new JsonObject();
             hits.add(new SearchHit(
                     stringValue(hit, "_id"),
-                    stringValue(fields, "text"),
+                    stringValue(fields, resolvedTextField),
                     hit.has("_score") ? hit.get("_score").getAsDouble() : 0.0,
                     stringValue(fields, "source_key"),
                     stringValue(fields, "chunk_index"),

@@ -33,6 +33,10 @@ Parameters:
     Type: String
     Default: "*"
     Description: Origen(es) permitidos por CORS, separados por coma (ej. "*" o "https://app.com,http://localhost:5173")
+  SessionsUserIndex:
+    Type: String
+    Default: user-updated-index
+    Description: Nombre del indice secundario para listar sesiones por usuario
   # Parametros opcionales de Cognito (si no se pasan se crean UserPool y AppClient nuevos)
   CognitoUserPoolName:
     Type: String
@@ -118,9 +122,22 @@ Resources:
       AttributeDefinitions:
         - AttributeName: session_id
           AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: updated_at
+          AttributeType: S
       KeySchema:
         - AttributeName: session_id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: !Ref SessionsUserIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       SSESpecification:
         SSEEnabled: true
 
@@ -148,6 +165,7 @@ Resources:
           OPENROUTER_SECRET_ARN: !Ref OpenRouterSecretArn
           OPENROUTER_MODEL: !Ref OpenRouterModel
           SESSIONS_TABLE: !Ref SessionsTable
+          SESSIONS_USER_INDEX: !Ref SessionsUserIndex
           # IDs del User Pool y App Client inyectados para validacion JWT en-process.
           COGNITO_USER_POOL_ID: !Ref UserPool
           COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
@@ -175,10 +193,51 @@ Resources:
             - Content-Type
             - Authorization
 
+  SessionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: com.example.SessionHandler::handleRequest
+      Runtime: java17
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 15
+      Environment:
+        Variables:
+          SESSIONS_TABLE: !Ref SessionsTable
+          SESSIONS_USER_INDEX: !Ref SessionsUserIndex
+          HISTORY_TURNS: 6
+          COGNITO_USER_POOL_ID: !Ref UserPool
+          COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:DeleteItem
+              Resource:
+                - !GetAtt SessionsTable.Arn
+                - !Sub '${SessionsTable.Arn}/index/${SessionsUserIndex}'
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: !Split [",", !Ref CorsAllowedOrigins]
+          AllowMethods:
+            - GET
+            - DELETE
+          AllowHeaders:
+            - Content-Type
+            - Authorization
+
 Outputs:
   QueryFunctionUrl:
     Description: "URL publica del microservicio de consulta (POST /query)"
     Value: !GetAtt QueryFunctionUrl.FunctionUrl
+  SessionFunctionUrl:
+    Description: "URL para listar, consultar y eliminar conversaciones"
+    Value: !GetAtt SessionFunctionUrl.FunctionUrl
   SessionsTableName:
     Description: "Tabla DynamoDB de sesiones"
     Value: !Ref SessionsTable

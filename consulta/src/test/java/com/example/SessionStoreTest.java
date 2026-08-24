@@ -80,4 +80,12 @@ class SessionStoreTest {
 
         assertTrue(SessionStore.trimHistory(history, 6).size() == 2);
     }
+
+    @Test
+    void limitsPersistedMessageLength() {
+        ChatMessage limited = SessionStore.limitMessage(ChatMessage.assistant("x".repeat(12_001)));
+
+        assertEquals(12_003, limited.content().length());
+        assertTrue(limited.content().endsWith("..."));
+    }
 }

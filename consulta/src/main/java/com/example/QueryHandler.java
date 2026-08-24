@@ -7,6 +7,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2HTTPResponse;
 import com.example.DeepSeekClient.ChatMessage;
 import com.example.RagContextBuilder.Source;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +45,8 @@ public class QueryHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
 
     private static final Logger logger = LoggerFactory.getLogger(QueryHandler.class);
     private static final Gson GSON = new Gson();
+    private static final int MAX_QUESTION_LENGTH = 12_000;
+    private static final int MAX_SESSION_ID_LENGTH = 128;
 
     private final PineconeSearchClient searchClient;
     private final DeepSeekClient llmClient;
@@ -88,6 +91,9 @@ public class QueryHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
     @Override
     public APIGatewayV2HTTPResponse handleRequest(APIGatewayV2HTTPEvent event, Context context) {
         try {
+            if (event != null && method(event) != null && !"POST".equalsIgnoreCase(method(event))) {
+                return buildErrorResponse(405, "Metodo no permitido");
+            }
             // Paso 1: Verificar el token JWT de Cognito. Devuelve HTTP 401 si está ausente o es inválido.
             String authHeader = authorizationHeader(event);
             String userId;
@@ -146,12 +152,41 @@ public class QueryHandler implements RequestHandler<APIGatewayV2HTTPEvent, APIGa
             if (body == null) {
                 return new QueryRequest(null, null);
             }
-            return new QueryRequest(
-                    body.has("question") ? body.get("question").getAsString() : null,
-                    body.has("session_id") ? body.get("session_id").getAsString() : null);
+            String question = stringField(body, "question");
+            String sessionId = stringField(body, "session_id");
+            if (question != null && question.length() > MAX_QUESTION_LENGTH) {
+                throw new IllegalArgumentException("La pregunta supera el limite de 12000 caracteres.");
+            }
+            if (sessionId != null && (sessionId.isBlank() || sessionId.length() > MAX_SESSION_ID_LENGTH
+                    || sessionId.contains("#"))) {
+                throw new IllegalArgumentException("Session ID invalido.");
+            }
+            return new QueryRequest(question, sessionId);
         } catch (RuntimeException e) {
+            if (e instanceof IllegalArgumentException && e.getMessage() != null
+                    && (e.getMessage().startsWith("La pregunta") || e.getMessage().startsWith("Session ID"))) {
+                throw e;
+            }
             throw new IllegalArgumentException("Body JSON invalido: " + e.getMessage());
         }
+    }
+
+    /** Lee únicamente campos JSON de tipo texto para evitar conversiones ambiguas. */
+    private static String stringField(JsonObject body, String name) {
+        if (!body.has(name) || body.get(name).isJsonNull()) return null;
+        JsonElement value = body.get(name);
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+            throw new IllegalArgumentException("El campo '" + name + "' debe ser texto.");
+        }
+        return value.getAsString();
+    }
+
+    /** Obtiene el método HTTP si el evento trae contexto v2. */
+    private static String method(APIGatewayV2HTTPEvent event) {
+        if (event == null || event.getRequestContext() == null || event.getRequestContext().getHttp() == null) {
+            return null;
+        }
+        return event.getRequestContext().getHttp().getMethod();
     }
 
     /** Obtiene Authorization sin depender de la capitalización usada por el proxy HTTP. */

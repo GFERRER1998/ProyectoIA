@@ -18,6 +18,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Punto de entrada del pipeline de ingestión de documentos en AWS Lambda.
@@ -37,8 +38,10 @@ import java.util.List;
 public class PdfTextExtractor implements RequestHandler<S3Event, String> {
 
     private static final Logger logger = LoggerFactory.getLogger(PdfTextExtractor.class);
+    private static final long MAX_FILE_SIZE = 50L * 1024 * 1024;
     private final S3Client s3Client;
     private final PineconeClient pineconeClient;
+    private final DocumentStore documentStore;
 
     /**
      * Constructor por defecto para ejecución en AWS Lambda en producción.
@@ -47,6 +50,7 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
     public PdfTextExtractor() {
         this.s3Client = S3Client.builder().build();
         this.pineconeClient = PineconeClient.fromEnvironment();
+        this.documentStore = DocumentStore.fromEnvironment();
     }
 
     /**
@@ -55,7 +59,7 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
      * @param s3Client Cliente S3 simulado o configurado para pruebas.
      */
     public PdfTextExtractor(S3Client s3Client) {
-        this(s3Client, null);
+        this(s3Client, null, null);
     }
 
     /**
@@ -65,8 +69,15 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
      * @param pineconeClient Cliente Pinecone para persistencia.
      */
     public PdfTextExtractor(S3Client s3Client, PineconeClient pineconeClient) {
+        this(s3Client, pineconeClient, null);
+    }
+
+    /** Constructor para pruebas que permite controlar la persistencia de estados. */
+    public PdfTextExtractor(S3Client s3Client, PineconeClient pineconeClient,
+                            DocumentStore documentStore) {
         this.s3Client = s3Client;
         this.pineconeClient = pineconeClient;
+        this.documentStore = documentStore;
     }
 
     /**
@@ -117,6 +128,19 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
             srcKey = URLDecoder.decode(record.getS3().getObject().getKey(), StandardCharsets.UTF_8);
         }
 
+        String documentId = documentIdFromKey(srcKey);
+        updateStatus(documentId, DocumentStore.Status.PROCESSING, null);
+        try {
+            return processRecordInternal(record, srcBucket, srcKey, documentId);
+        } catch (RuntimeException e) {
+            updateStatus(documentId, DocumentStore.Status.ERROR, "No se pudo procesar el documento");
+            throw e;
+        }
+    }
+
+    /** Procesa un registro ya identificado y actualiza el estado exitoso al terminar. */
+    private String processRecordInternal(S3EventNotification.S3EventNotificationRecord record,
+                                         String srcBucket, String srcKey, String documentId) {
         logger.info("Recibido archivo: {} del bucket: {}", srcKey, srcBucket);
         if (!srcKey.toLowerCase().endsWith(".pdf")) {
             logger.warn("El archivo {} no es un PDF. Saltando procesamiento.", srcKey);
@@ -133,7 +157,7 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
         logger.info("Descargando PDF desde S3...");
         String extractedText;
         try (ResponseInputStream<GetObjectResponse> s3Object = s3Client.getObject(getObjectRequest);
-             PDDocument document = Loader.loadPDF(s3Object.readAllBytes())) {
+             PDDocument document = loadPdfWithinLimit(s3Object)) {
             logger.info("PDF descargado correctamente. Extrayendo texto...");
             extractedText = new PDFTextStripper().getText(document);
         } catch (Exception e) {
@@ -148,6 +172,7 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
         List<String> chunks = chunking.chunks();
         if (chunks.isEmpty()) {
             logger.warn("No se extrajo texto utilizable del archivo: {}", srcKey);
+            updateStatus(documentId, DocumentStore.Status.ERROR, "El PDF no contiene texto utilizable");
             return "Sin texto extraible: " + srcKey;
         }
 
@@ -163,7 +188,47 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
             pineconeClient.upsertChunks(srcBucket, srcKey, etag, "application/pdf", chunks);
         }
 
+        updateStatus(documentId, DocumentStore.Status.READY, null);
         return "Exito. Archivo procesado: " + srcKey + ". Caracteres extraidos: "
                 + extractedText.length() + ". Chunks generados: " + chunks.size();
+    }
+
+    /** Rechaza objetos mayores al límite antes de materializarlos completamente en memoria. */
+    private static PDDocument loadPdfWithinLimit(ResponseInputStream<GetObjectResponse> s3Object)
+            throws java.io.IOException {
+        Long contentLength = s3Object.response().contentLength();
+        if (contentLength != null && contentLength > MAX_FILE_SIZE) {
+            throw new IllegalArgumentException("El PDF supera el limite de 50 MB");
+        }
+        return Loader.loadPDF(s3Object.readAllBytes());
+    }
+
+    /** Extrae el UUID de documento incluido al inicio del nombre de objeto S3. */
+    static String documentIdFromKey(String objectKey) {
+        String[] segments = objectKey.split("/");
+        if (segments.length < 3 || segments[2].length() < 37) return null;
+        String candidate = segments[2].substring(0, 36);
+        if (segments[2].charAt(36) != '-' || !isUuid(candidate)) return null;
+        return candidate;
+    }
+
+    /** Comprueba el formato UUID canónico usado por las claves de subida. */
+    private static boolean isUuid(String value) {
+        try {
+            return UUID.fromString(value).toString().equalsIgnoreCase(value);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** Actualiza DynamoDB sin ocultar el resultado del procesamiento principal. */
+    private void updateStatus(String documentId, DocumentStore.Status status, String error) {
+        if (documentStore != null && documentId != null) {
+            try {
+                documentStore.updateStatus(documentId, status, error);
+            } catch (RuntimeException e) {
+                logger.error("No se pudo actualizar el estado del documento {} a {}", documentId, status, e);
+            }
+        }
     }
 }

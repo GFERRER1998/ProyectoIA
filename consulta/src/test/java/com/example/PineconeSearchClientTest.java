@@ -88,6 +88,15 @@ class PineconeSearchClientTest {
         assertNull(hits.get(0).sourceKey());
     }
 
+    @Test
+    void parseSearchResponseUsesConfiguredTextField() {
+        String body = "{\"hits\":[{\"_id\":\"custom-1\",\"fields\":{\"content\":\"texto configurable\"}}]}";
+
+        List<SearchHit> hits = PineconeSearchClient.parseSearchResponse(body, "content");
+
+        assertEquals("texto configurable", hits.get(0).text());
+    }
+
     /**
      * Valida que se devuelva una lista vacía para cadenas en blanco o respuestas sin resultados.
      */

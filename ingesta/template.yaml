@@ -29,6 +29,20 @@ Parameters:
     Type: String
     Default: text
     Description: Campo del registro que el indice mapea para embedding (field_map)
+  CognitoUserPoolId:
+    Type: String
+    Description: ID del User Pool que emite los ID Tokens
+  CognitoAppClientId:
+    Type: String
+    Description: ID del App Client publico usado por el frontend
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:3000
+    Description: Origen(es) permitidos por CORS separados por coma (ej. "http://localhost:3000,https://app.vercel.app")
+  DocumentsUserIndex:
+    Type: String
+    Default: user-updated-index
+    Description: Nombre del indice secundario para listar documentos por usuario
 
 Resources:
   # -------------------------------------------------------------------------
@@ -39,6 +53,131 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref BucketName
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: !Split [",", !Ref FrontendOrigin]
+            AllowedMethods:
+              - PUT
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - '*'
+            ExposedHeaders:
+              - ETag
+
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: document_id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: updated_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: document_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: !Ref DocumentsUserIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+
+  UploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: com.example.UploadUrlHandler::handleRequest
+      Runtime: java17
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 15
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET: !Ref DocumentsBucket
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          DOCUMENTS_USER_INDEX: !Ref DocumentsUserIndex
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_APP_CLIENT_ID: !Ref CognitoAppClientId
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub '${DocumentsBucket.Arn}/documents/*'
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt DocumentsTable.Arn
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: !Split [",", !Ref FrontendOrigin]
+          AllowMethods:
+            - POST
+          AllowHeaders:
+            - Content-Type
+            - Authorization
+
+  DocumentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: com.example.DocumentHandler::handleRequest
+      Runtime: java17
+      Architectures:
+        - x86_64
+      MemorySize: 512
+      Timeout: 15
+      Environment:
+        Variables:
+          DOCUMENTS_BUCKET: !Ref DocumentsBucket
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          DOCUMENTS_USER_INDEX: !Ref DocumentsUserIndex
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_APP_CLIENT_ID: !Ref CognitoAppClientId
+          PINECONE_SECRET_ARN: !Ref PineconeSecretArn
+          PINECONE_INDEX_HOST: !Ref PineconeIndexHost
+          PINECONE_NAMESPACE: !Ref PineconeNamespace
+          PINECONE_TEXT_FIELD: !Ref PineconeTextField
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: !Sub '${DocumentsBucket.Arn}/documents/*'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:DeleteItem
+              Resource:
+                - !GetAtt DocumentsTable.Arn
+                - !Sub '${DocumentsTable.Arn}/index/${DocumentsUserIndex}'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref PineconeSecretArn
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: !Split [",", !Ref FrontendOrigin]
+          AllowMethods:
+            - GET
+            - DELETE
+          AllowHeaders:
+            - Content-Type
+            - Authorization
 
   # -------------------------------------------------------------------------
   # Funcion Lambda: orquesta todo el flujo de ingesta. No contiene la logica
@@ -69,21 +208,25 @@ Resources:
           # Campo que el indice usa para embedding. En rag-index es "text";
           # si el indice cambiara de field_map, solo se cambia este parametro.
           PINECONE_TEXT_FIELD: !Ref PineconeTextField
+          DOCUMENTS_TABLE: !Ref DocumentsTable
+          DOCUMENTS_USER_INDEX: !Ref DocumentsUserIndex
       Policies:
         - Statement:
-            # Leer PDFs de cualquier bucket (el evento S3 puede llegar de
-            # cualquier bucket del futuro; el filtro real esta en el trigger).
+            # La Lambda solo necesita leer los PDFs del bucket configurado.
             - Effect: Allow
               Action:
-                - s3:*
-                - s3express:*
-              Resource: "*"
+                - s3:GetObject
+              Resource: !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/documents/*'
             # Acceso minimo a secretos: solo puede leer el secreto de Pinecone,
             # nunca otros secretos de la cuenta.
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Ref PineconeSecretArn
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource: !GetAtt DocumentsTable.Arn
       Events:
         # Trigger de ingesta: despierta la Lambda SOLO cuando se crea un objeto
         # en el bucket que cumpla los dos filtros (prefijo documents/ y .pdf).
@@ -109,3 +252,9 @@ Outputs:
   DocumentsBucketName:
     Description: "Bucket S3 donde se suben los PDFs (prefijo documents/)"
     Value: !Ref DocumentsBucket
+  UploadFunctionUrl:
+    Description: "URL para solicitar URLs S3 prefirmadas"
+    Value: !GetAtt UploadUrlFunctionUrl.FunctionUrl
+  DocumentsFunctionUrl:
+    Description: "URL para listar y visualizar documentos del usuario"
+    Value: !GetAtt DocumentsFunctionUrl.FunctionUrl

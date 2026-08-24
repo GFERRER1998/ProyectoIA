@@ -20,6 +20,7 @@
         <pdfbox.version>3.0.2</pdfbox.version>
         <slf4j.version>2.0.12</slf4j.version>
         <junit.version>5.10.2</junit.version>
+        <nimbus.version>9.37.3</nimbus.version>
     </properties>
 
     <!-- 
@@ -66,6 +67,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>secretsmanager</artifactId>
         </dependency>
+        <!-- DynamoDB almacena metadata y estado de procesamiento de documentos. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dynamodb</artifactId>
+        </dependency>
 
         <!-- Apache PDFBox para procesar el PDF -->
         <dependency>
@@ -94,6 +100,18 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>2.11.0</version>
+        </dependency>
+
+        <!-- Verificacion de ID Tokens Cognito para la API de subida. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+            <version>${nimbus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.minidev</groupId>
+            <artifactId>json-smart</artifactId>
+            <version>2.5.1</version>
         </dependency>
     </dependencies>
 

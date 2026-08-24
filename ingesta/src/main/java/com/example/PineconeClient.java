@@ -112,7 +112,7 @@ public final class PineconeClient {
      * @param chunks Lista de fragmentos de texto a persistir.
      */
     public void upsertChunks(String bucket, String key, String etag, String contentType,
-                             List<String> chunks) {
+                              List<String> chunks) {
         // Un documento puede producir muchos chunks. Todos comparten un documentId
         // y se diferencian por el indice del chunk.
         String documentId = documentId(bucket, key, etag);
@@ -139,6 +139,51 @@ public final class PineconeClient {
             // Pinecone recibe varios lotes si el PDF tiene mas de 100 chunks.
             int end = Math.min(start + MAX_RECORDS_PER_REQUEST, records.size());
             sendBatch(records.subList(start, end));
+        }
+    }
+
+    /** Elimina todos los chunks asociados a una clave S3 concreta. */
+    public void deleteBySource(String bucket, String key) {
+        JsonObject filter = new JsonObject();
+        JsonObject bucketFilter = new JsonObject();
+        bucketFilter.addProperty("$eq", bucket);
+        JsonObject keyFilter = new JsonObject();
+        keyFilter.addProperty("$eq", key);
+        filter.add("source_bucket", bucketFilter);
+        filter.add("source_key", keyFilter);
+
+        JsonObject body = new JsonObject();
+        body.add("filter", filter);
+        body.addProperty("namespace", namespace);
+        URI endpoint = URI.create(indexHost + "/vectors/delete");
+        HttpRequest request = HttpRequest.newBuilder(endpoint)
+                .timeout(requestTimeout)
+                .header("Content-Type", "application/json")
+                .header("Api-Key", apiKey)
+                .header("X-Pinecone-Api-Version", API_VERSION)
+                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                .build();
+        sendDelete(request);
+    }
+
+    private void sendDelete(HttpRequest request) {
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                int status = response.statusCode();
+                if (status >= 200 && status < 300) return;
+                if (!isRetryable(status) || attempt == MAX_ATTEMPTS) {
+                    throw new IllegalStateException("Pinecone delete failed with HTTP status " + status);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Pinecone delete interrupted", e);
+            } catch (Exception e) {
+                if (attempt == MAX_ATTEMPTS) {
+                    throw new IllegalStateException("Pinecone delete failed after retries", e);
+                }
+            }
+            sleepBeforeRetry(attempt);
         }
     }
 
