@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  consulta-rag-lambda
+
+  Microservicio de consulta RAG: recibe preguntas via Lambda Function URL,
+  recupera contexto de Pinecone (busqueda vectorial), genera la respuesta con
+  DeepSeek via OpenRouter y guarda las sesiones en DynamoDB.
+
+Parameters:
+  PineconeSecretArn:
+    Type: String
+    Description: ARN del secreto de Secrets Manager con la API key de Pinecone
+  PineconeIndexHost:
+    Type: String
+    Description: Host HTTPS del indice Pinecone, sin https:// final
+  PineconeNamespace:
+    Type: String
+    Default: documents-dev
+    Description: Namespace donde estan los chunks indexados
+  PineconeTextField:
+    Type: String
+    Default: text
+    Description: Campo del registro que el indice mapea para embedding (field_map)
+  OpenRouterSecretArn:
+    Type: String
+    Description: ARN del secreto de Secrets Manager con la API key de OpenRouter (apiKey)
+  OpenRouterModel:
+    Type: String
+    Default: nvidia/nemotron-3-ultra-550b-a55b:free
+    Description: Modelo LLM a usar en OpenRouter (los modelos free terminan en :free)
+  CorsAllowedOrigins:
+    Type: String
+    Default: "*"
+    Description: Origen(es) permitidos por CORS, separados por coma (ej. "*" o "https://app.com,http://localhost:5173")
+
+Resources:
+  # -------------------------------------------------------------------------
+  # Tabla de sesiones: una fila por sesion de chat con el historial completo.
+  # Facturacion on-demand (pay per request), ideal para uso esporadico.
+  # -------------------------------------------------------------------------
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  # -------------------------------------------------------------------------
+  # Funcion Lambda de consulta: orquesta busqueda vectorial + LLM + sesion.
+  # La URL de la funcion (Function URL) es el punto de entrada publico:
+  # gratis (no paga por request), contrato OpenAI-compatible via APIGatewayV2HTTPEvent.
+  # -------------------------------------------------------------------------
+  QueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: com.example.QueryHandler::handleRequest
+      Runtime: java17
+      Architectures:
+        - x86_64
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          PINECONE_SECRET_ARN: !Ref PineconeSecretArn
+          PINECONE_INDEX_HOST: !Ref PineconeIndexHost
+          PINECONE_NAMESPACE: !Ref PineconeNamespace
+          PINECONE_TEXT_FIELD: !Ref PineconeTextField
+          OPENROUTER_SECRET_ARN: !Ref OpenRouterSecretArn
+          OPENROUTER_MODEL: !Ref OpenRouterModel
+          SESSIONS_TABLE: !Ref SessionsTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Ref PineconeSecretArn
+                - !Ref OpenRouterSecretArn
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt SessionsTable.Arn
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: !Split [",", !Ref CorsAllowedOrigins]
+          AllowMethods:
+            - POST
+          AllowHeaders:
+            - Content-Type
+
+Outputs:
+  QueryFunctionUrl:
+    Description: "URL publica del microservicio de consulta (POST /query)"
+    Value: !GetAtt QueryFunctionUrl.FunctionUrl
+  SessionsTableName:
+    Description: "Tabla DynamoDB de sesiones"
+    Value: !Ref SessionsTable

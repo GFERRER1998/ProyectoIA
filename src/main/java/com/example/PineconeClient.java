@@ -26,7 +26,7 @@ import java.util.Map;
  *
  * Pinecone recibe el texto mediante un indice con embedding integrado y
  * genera el vector internamente. Esta clase no sabe como se extrae ni como
- * se divide el PDF; solo recibe chunks listos y los convierte en registros.
+ * se divide el PDF; solo recibe chunks listos y los convierte en registros pinecone.
  */
 public final class PineconeClient {
 
@@ -43,74 +43,45 @@ public final class PineconeClient {
     private final String apiKey;
     private final String indexHost;
     private final String namespace;
-    private final String textField;
     private final Duration requestTimeout;
 
-    /**
-     * Constructor utilizado por la Lambda en entorno de producción.
-     *
-     * @param apiKey Clave de API de Pinecone.
-     * @param indexHost Host HTTPS del índice Pinecone.
-     * @param namespace Namespace de destino para los registros.
-     */
     public PineconeClient(String apiKey, String indexHost, String namespace) {
-        this(apiKey, indexHost, namespace, "text",
+        // Constructor usado por la Lambda en produccion.
+        // HttpClient se reutiliza durante invocaciones calientes de Lambda.
+        this(apiKey, indexHost, namespace,
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
                 Duration.ofSeconds(30));
     }
 
-    /**
-     * Constructor con inyección completa de dependencias para testing o configuración avanzada.
-     *
-     * @param apiKey Clave de API de Pinecone.
-     * @param indexHost Host del índice.
-     * @param namespace Namespace del índice.
-     * @param textField Nombre del campo mapeado a embedding.
-     * @param httpClient Cliente HTTP reutilizable.
-     * @param requestTimeout Tiempo máximo de espera por petición.
-     */
-    PineconeClient(String apiKey, String indexHost, String namespace, String textField,
+    PineconeClient(String apiKey, String indexHost, String namespace,
                    HttpClient httpClient, Duration requestTimeout) {
+        // Validamos la configuracion antes de aceptar documentos para evitar
+        // llamadas HTTP imposibles o errores poco claros durante el upsert.
         if (apiKey == null || apiKey.isBlank() || indexHost == null || indexHost.isBlank()) {
             throw new IllegalArgumentException("Pinecone API key and index host are required");
         }
         this.apiKey = apiKey;
+        // El host puede venir con una barra final; la quitamos para no formar URLs //records.
         this.indexHost = removeTrailingSlash(indexHost);
         this.namespace = namespace == null || namespace.isBlank() ? "__default__" : namespace;
-        this.textField = textField == null || textField.isBlank() ? "text" : textField;
         this.httpClient = httpClient;
         this.requestTimeout = requestTimeout;
         this.gson = new Gson();
     }
 
-    /**
-     * Carga la API key desde Secrets Manager y los parámetros desde variables de entorno.
-     *
-     * @return Instancia configurada de {@link PineconeClient}.
-     */
+    /** Loads the API key from Secrets Manager and the endpoint from Lambda environment variables. */
     public static PineconeClient fromEnvironment() {
+        // La API key nunca se lee directamente del codigo ni se registra en logs.
+        // Lambda solo recibe el ARN del secreto y lo consulta con IAM.
         String secretArn = requiredEnvironment("PINECONE_SECRET_ARN");
         String secret = SecretsManagerClient.create().getSecretValue(GetSecretValueRequest.builder()
                 .secretId(secretArn)
                 .build()).secretString();
         return new PineconeClient(parseApiKey(secret),
                 requiredEnvironment("PINECONE_INDEX_HOST"),
-                System.getenv("PINECONE_NAMESPACE"),
-                System.getenv("PINECONE_TEXT_FIELD"),
-                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
-                Duration.ofSeconds(30));
+                System.getenv("PINECONE_NAMESPACE"));
     }
 
-    /**
-     * Convierte los fragmentos de texto en registros estructurados y los envía en lotes
-     * al índice de Pinecone con embeddings integrados.
-     *
-     * @param bucket Nombre del bucket S3 de origen.
-     * @param key Clave del archivo PDF.
-     * @param etag ETag del objeto en S3.
-     * @param contentType Tipo MIME del archivo.
-     * @param chunks Lista de fragmentos de texto a persistir.
-     */
     public void upsertChunks(String bucket, String key, String etag, String contentType,
                              List<String> chunks) {
         // Un documento puede producir muchos chunks. Todos comparten un documentId
@@ -131,6 +102,7 @@ public final class PineconeClient {
                             "source_bucket", bucket,
                             "source_key", key,
                             "chunk_index", Integer.toString(index),
+                            "chunk_text", chunk,
                             "content_type", contentType == null ? "application/pdf" : contentType,
                             "ingested_at", ingestedAt)));
         }
@@ -150,8 +122,7 @@ public final class PineconeClient {
         for (PineconeRecord record : records) {
             JsonObject json = new JsonObject();
             json.addProperty("_id", record.id());
-            // El texto se envia en el campo que el indice tiene configurado en field_map.
-            json.addProperty(textField, record.chunkText());
+            json.addProperty("chunk_text", record.chunkText());
             record.metadata().forEach(json::addProperty);
             body.append(gson.toJson(json)).append('\n');
         }
@@ -211,10 +182,9 @@ public final class PineconeClient {
     }
 
     static String buildNdjson(String bucket, String key, String etag, String contentType,
-                              String textField, List<String> chunks) {
+                              List<String> chunks) {
         // Metodo auxiliar para tests y diagnostico: construye el mismo formato
         // que se envia al endpoint sin ejecutar una llamada de red.
-        String safeTextField = textField == null || textField.isBlank() ? "text" : textField;
         String documentId = documentId(bucket, key, etag);
         String ingestedAt = Instant.now().toString();
         Gson gson = new Gson();
@@ -226,7 +196,7 @@ public final class PineconeClient {
             json.addProperty("source_bucket", bucket);
             json.addProperty("source_key", key);
             json.addProperty("chunk_index", Integer.toString(index));
-            json.addProperty(safeTextField, chunks.get(index));
+            json.addProperty("chunk_text", chunks.get(index));
             json.addProperty("content_type", contentType == null ? "application/pdf" : contentType);
             json.addProperty("ingested_at", ingestedAt);
             body.append(gson.toJson(json)).append('\n');

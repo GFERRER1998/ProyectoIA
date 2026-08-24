@@ -19,30 +19,63 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Punto de entrada del pipeline de ingestión de documentos en AWS Lambda.
+ *
+ * <p>Esta función es invocada automáticamente ante eventos {@code s3:ObjectCreated:*} en el bucket
+ * de documentos (bajo el prefijo {@code documents/} y con extensión {@code .pdf}).</p>
+ *
+ * <p>Orquesta el siguiente flujo:
+ * <ol>
+ *   <li>Descarga el archivo PDF desde el bucket S3 de origen.</li>
+ *   <li>Extrae el contenido textual utilizando Apache PDFBox.</li>
+ *   <li>Normaliza y fragmenta el texto en chunks de tamaño controlado ({@link TextChunker}).</li>
+ *   <li>Envía los chunks resultantes con metadatos al índice Pinecone ({@link PineconeClient}).</li>
+ * </ol>
+ * </p>
+ */
 public class PdfTextExtractor implements RequestHandler<S3Event, String> {
 
     private static final Logger logger = LoggerFactory.getLogger(PdfTextExtractor.class);
     private final S3Client s3Client;
     private final PineconeClient pineconeClient;
 
+    /**
+     * Constructor por defecto para ejecución en AWS Lambda en producción.
+     * Inicializa el cliente S3 con credenciales de entorno y Pinecone desde Secrets Manager.
+     */
     public PdfTextExtractor() {
-        // Inicializa el cliente S3 (usará las credenciales y región por defecto del entorno Lambda)
         this.s3Client = S3Client.builder().build();
-        // Carga la API key desde Secrets Manager y la configuración desde variables Lambda.
         this.pineconeClient = PineconeClient.fromEnvironment();
     }
 
-    // Constructor para testing
+    /**
+     * Constructor para testing con cliente S3 personalizado.
+     *
+     * @param s3Client Cliente S3 simulado o configurado para pruebas.
+     */
     public PdfTextExtractor(S3Client s3Client) {
         this(s3Client, null);
     }
 
-    // Constructor para testing: permite simular S3 sin realizar llamadas a Pinecone.
+    /**
+     * Constructor para testing con clientes S3 y Pinecone inyectados.
+     *
+     * @param s3Client Cliente S3 para descarga.
+     * @param pineconeClient Cliente Pinecone para persistencia.
+     */
     public PdfTextExtractor(S3Client s3Client, PineconeClient pineconeClient) {
         this.s3Client = s3Client;
         this.pineconeClient = pineconeClient;
     }
 
+    /**
+     * Manejador del evento S3 entregado por AWS Lambda.
+     *
+     * @param s3event Evento de notificación de S3 con los registros de archivos creados.
+     * @param context Contexto de ejecución de Lambda.
+     * @return Resumen del procesamiento de los archivos.
+     */
     @Override
     public String handleRequest(S3Event s3event, Context context) {
         // Punto de entrada de Lambda: S3 entrega el bucket y la clave del PDF.
@@ -67,6 +100,14 @@ public class PdfTextExtractor implements RequestHandler<S3Event, String> {
         }
     }
 
+    /**
+     * Procesa un registro individual de notificación de evento S3:
+     * valida la extensión del archivo, descarga el PDF, extrae texto con PDFBox,
+     * ejecuta el chunking y persiste los vectores en Pinecone.
+     *
+     * @param record Registro individual de evento S3.
+     * @return Mensaje de estado del procesamiento del archivo.
+     */
     private String processRecord(S3EventNotification.S3EventNotificationRecord record) {
         String srcBucket = record.getS3().getBucket().getName();
 

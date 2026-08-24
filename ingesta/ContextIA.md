@@ -3,19 +3,20 @@
 ## Resumen General
 Esta arquitectura describe un sistema de Generación Aumentada por Recuperación (RAG) serverless implementado en AWS. El sistema consta de dos flujos principales: el **Flujo de Ingestión e Indexación de Documentos** (implementado) y el **Flujo de Consulta / Respuesta (RAG)** (futuro), apoyados por servicios auxiliares de la nube.
 
-> Estado: **ingestión completa y verificada (v1)**. Consulta RAG, DynamoDB, Cognito y API Gateway son fases futuras.
+> Estado: **ingestión completa y verificada (v1)**. **Consulta RAG implementada y verificada (v2, ver `consulta/`)**. Cognito y API Gateway son fases futuras.
 
 ---
 
 ## Servicios de AWS y sus Roles en la Arquitectura
 
 ### 1. Entrada y Salida (Interfaces)
-* **Amazon API Gateway (HTTPS):** *(futuro)* Punto de entrada público para el flujo de consulta.
+* **Lambda Function URL (HTTPS, implementado en `consulta/`):** punto de entrada público del flujo de consulta (costo $0 por request; API Gateway queda como opción futura si se necesita WAF/throttling).
 
 ### 2. Cómputo y Lógica Principal
 * **AWS Lambda `PdfTextExtractorFunction` (Java 17, implementado):**
   * En la **ingestión**: se activa por el evento `s3:ObjectCreated:*` del bucket (prefijo `documents/`, sufijo `.pdf`). Descarga el PDF, extrae texto (PDFBox), divide en chunks (`TextChunker`) y envía los registros a Pinecone (`PineconeClient`).
-  * En las **consultas**: *(futuro)* coordinará búsqueda vectorial, LLM e historial.
+* **AWS Lambda `QueryFunction` (Java 17, implementado en `consulta/`):**
+  * En las **consultas**: recibe la pregunta, busca en Pinecone (`PineconeSearchClient`), arma el prompt RAG (`RagContextBuilder`), llama al LLM vía OpenRouter (`DeepSeekClient`) y guarda el turno en DynamoDB (`SessionStore`).
 
 ### 3. Almacenamiento de Archivos y Documentos
 * **Amazon S3 — Bucket `rag-documents-683023468765` (implementado):**
@@ -27,10 +28,10 @@ Esta arquitectura describe un sistema de Generación Aumentada por Recuperación
 
 ### 5. Inteligencia Artificial / Modelos Generativos (LLM & Embeddings)
 * **Embeddings (implementado):** los genera **Pinecone server-side** (modelo del índice, `llama-text-embed-v2` o similar). La Lambda **no** llama a ningún proveedor de embeddings.
-* **Grok API (futuro):** LLM para generar respuestas en el flujo de consulta (Claude, Llama, Mistral, Nova, etc. como alternativas).
+* **LLM de consulta (implementado en `consulta/`):** DeepSeek u otros modelos `:free` vía **OpenRouter** (hoy: `nvidia/nemotron-3-ultra-550b-a55b:free`). Key en Secrets Manager (`openrouter/chat`).
 
 ### 6. Persistencia de Sesión e Historial
-* **Amazon DynamoDB:** *(futuro)* historial de conversaciones, datos de usuarios y sesiones activas.
+* **Amazon DynamoDB (implementado en `consulta/`):** tabla `rag-sessions` (PK `session_id`) con el historial de conversaciones.
 
 ---
 
@@ -53,12 +54,11 @@ Esta arquitectura describe un sistema de Generación Aumentada por Recuperación
 5. **Vectorización (server-side):** **Pinecone** genera los embeddings del texto al indexar (asíncrono; buscable en segundos).
 6. **IDs determinísticos:** `sha256(bucket+key+etag)[0:16]_chunk_N` → re-subir el mismo archivo sobrescribe, no duplica.
 
-### B. Flujo de Consulta (RAG) — *futuro*
-1. **Envío:** El **Usuario** realiza una pregunta desde la App Web.
-2. **Recepción:** **Amazon API Gateway** recibe la solicitud HTTPS.
-3. **Procesamiento:** **AWS Lambda** procesa la solicitud.
-4. **Búsqueda Vectorial:** Lambda consulta `POST /records/namespaces/<ns>/search` para recuperar los fragmentos más relevantes (el índice admite búsqueda por texto; verificado).
-5. **Generación:** Lambda envía la pregunta original + el contexto recuperado a **Grok api**.
-6. **Respuesta:** Grok genera la respuesta basada en el contexto recibido y se la devuelve a Lambda.
-7. **Guardado:** Lambda registra la conversación/interacción en **Amazon DynamoDB**.
-8. **Devolución:** La respuesta final se entrega al usuario a través de API Gateway.
+### B. Flujo de Consulta (RAG) — implementado (v2)
+1. **Envío:** El **Usuario** realiza una pregunta (HTTP POST) a la **Lambda Function URL** del microservicio `consulta/`.
+2. **Recepción:** la URL invoca a **AWS Lambda `QueryFunction`** (`consulta/`).
+3. **Búsqueda Vectorial:** la Lambda consulta `POST /records/namespaces/<ns>/search` para recuperar los fragmentos más relevantes (top_k, score `_score`).
+4. **Generación:** `RagContextBuilder` arma el prompt (sistema + contexto con citas + historial + pregunta) y `DeepSeekClient` lo envía a **OpenRouter** (modelo `:free`).
+5. **Respuesta:** el LLM genera la respuesta basada en el contexto y se la devuelve a Lambda.
+6. **Guardado:** `SessionStore` registra el turno en **Amazon DynamoDB** (tabla `rag-sessions`).
+7. **Devolución:** la respuesta final (answer + sources + session_id) se entrega al usuario.
